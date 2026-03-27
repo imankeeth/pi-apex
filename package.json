@@ -1,0 +1,20 @@
+{
+  "name": "pi-apex",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:sdk": "cd packages/sdk && npm run build",
+    "build:react-sdk": "cd packages/react-sdk && npm run build",
+    "build:shell": "cd packages/shell && npm run build",
+    "build:extensions": "npm run build --workspace=@pi-apex/thread-tree",
+    "dev": "cd packages/ui-server && npm run dev",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

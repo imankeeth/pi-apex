@@ -1,0 +1,11 @@
+{
+  "id": "thread-tree",
+  "name": "Thread Tree",
+  "version": "0.1.0",
+  "description": "View your pi conversation as a threaded tree",
+  "icon": "🌳",
+  "type": "ui-extension",
+  "entry": "/extensions/thread-tree/bundle.js",
+  "tools": [],
+  "events": ["tool_call", "tool_result", "message", "session_fork", "session_switch"]
+}
