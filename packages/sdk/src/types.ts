@@ -16,6 +16,17 @@ export interface SessionContext {
   files: string[] | null;
 }
 
+export class SDKError extends Error {
+  constructor(
+    message: string,
+    public code: "VALIDATION" | "NETWORK" | "UNKNOWN" = "UNKNOWN",
+    public retryable = false
+  ) {
+    super(message);
+    this.name = "SDKError";
+  }
+}
+
 export interface ApexSessionSnapshot {
   session: {
     id: string;
@@ -165,12 +176,14 @@ export interface SessionAPI {
   getThread(): Promise<ThreadNode[]>;
   getBranches(): Promise<Branch[]>;
   fork(label?: string): Promise<Branch>;
+  // Implementations are async and should reject with SDKError on failure.
   switch(branchId: string): Promise<void>;
   abort(): Promise<void>;
   compact(): Promise<void>;
   getActiveBranch(): Promise<Branch | null>;
 }
 
+// Implementations are async and should reject with SDKError on failure.
 export interface MessagingAPI {
   send(text: string, options?: SendOptions): Promise<void>;
   sendAsUser(text: string): Promise<void>;
@@ -178,7 +191,7 @@ export interface MessagingAPI {
   prompt(text: string, options?: SendOptions): Promise<void>;
   steer(text: string): Promise<void>;
   followUp(text: string): Promise<void>;
-  append(type: string, data: unknown): Promise<void>;
+  append(type: string, data: unknown): void;
 }
 
 export interface ToolsAPI {

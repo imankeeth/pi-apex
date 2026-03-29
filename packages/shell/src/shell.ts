@@ -11,11 +11,13 @@ import {
   type ExtensionManifest,
   type Message,
   type PiSDK,
+  type SendOptions,
   type SessionContext,
   type ToolCall,
   type ThreadNode,
   type ToolDef,
   type ToolResult,
+  type ThinkingState,
 } from "@pi-apex/sdk";
 import { ApexSessionStore } from "./store.js";
 import { BrowserEventSource } from "./sse-client.js";
@@ -135,6 +137,14 @@ interface LoadedExtension {
   bridge: IframeBridge | null;
   iframe: HTMLIFrameElement;
   unmount?: () => void;
+}
+
+function safeMessages(snapshot: ApexSessionSnapshot | null): Message[] {
+  if (!snapshot?.messages || !Array.isArray(snapshot.messages)) {
+    return [];
+  }
+
+  return snapshot.messages as Message[];
 }
 
 class PiApexShell {
@@ -271,9 +281,14 @@ class PiApexShell {
       }
     };
 
-    return {
+    const subscribeTypedEvent = <T>(event: string, fn: (payload: T) => void): (() => void) => {
+      // External bridge payloads enter as unknown, so we adapt them at the SDK boundary.
+      return this.subscribeSdkEvent(event, fn as (payload: unknown) => void);
+    };
+
+    this.sdkBridge = {
       session: {
-        getMessages: async () => (readSnapshot()?.messages ?? []) as Message[],
+        getMessages: async () => safeMessages(readSnapshot()),
         getThread: async () => (readSnapshot()?.thread ?? []) as ThreadNode[],
         getBranches: async () => (readSnapshot()?.branches ?? []) as Branch[],
         fork: async (label?: string) => {
@@ -306,16 +321,18 @@ class PiApexShell {
           const branch = readSnapshot()?.branches.find((item) => item.id === branchId);
           if (branch) emit("session_switch", branch);
         },
-        abort: async () => {},
-        compact: async () => {},
+        abort: async () => {
+          await apexHttp.post("/action", { sessionId: readSnapshot()?.session.id ?? null, action: "session.abort" });
+        },
+        compact: async () => {
+          await apexHttp.post("/action", { sessionId: readSnapshot()?.session.id ?? null, action: "session.compact" });
+        },
         getActiveBranch: async () => readSnapshot()?.branches.find((branch) => branch.isActive) ?? null,
       },
       messaging: {
-        send: async (text: string, opts?: unknown) => {
+        send: async (text: string, opts?: SendOptions) => {
           console.log("[pi-apex] messaging.send:", text, opts);
-          const role = typeof opts === "object" && opts !== null && "deliverAs" in opts
-            ? (opts as { deliverAs?: string }).deliverAs
-            : undefined;
+          const role = opts?.deliverAs;
           const message: Message = {
             id: `msg-${Date.now()}`,
             role: role === "system" ? "system" : role === "followUp" || role === "steer" ? "custom" : "user",
@@ -332,8 +349,8 @@ class PiApexShell {
         sendAsSystem: async (text: string) => {
           await this.sdkBridge.messaging?.send?.(text, { deliverAs: "system" });
         },
-        prompt: async (text: string, opts?: unknown) => {
-          await this.sdkBridge.messaging?.send?.(text, opts as never);
+        prompt: async (text: string, opts?: SendOptions) => {
+          await this.sdkBridge.messaging?.send?.(text, opts);
         },
         steer: async (text: string) => {
           await this.sdkBridge.messaging?.send?.(text, { deliverAs: "steer" });
@@ -341,7 +358,7 @@ class PiApexShell {
         followUp: async (text: string) => {
           await this.sdkBridge.messaging?.send?.(text, { deliverAs: "followUp" });
         },
-        append: async (_type: string, _data: unknown) => {},
+        append: (_type: string, _data: unknown) => {},
       },
       tools: {
         getAll: async () => {
@@ -375,13 +392,16 @@ class PiApexShell {
         intercept: () => {},
       },
       events: {
-        onToolCall: (fn: unknown) => this.subscribeSdkEvent("tool_call", fn as (payload: unknown) => void),
-        onToolResult: (fn: unknown) => this.subscribeSdkEvent("tool_result", fn as (payload: unknown) => void),
-        onMessage: (fn: unknown) => this.subscribeSdkEvent("message", fn as (payload: unknown) => void),
-        onThinking: (fn: unknown) => this.subscribeSdkEvent("thinking", fn as (payload: unknown) => void),
-        onFork: (fn: unknown) => this.subscribeSdkEvent("session_fork", fn as (payload: unknown) => void),
-        onSwitch: (fn: unknown) => this.subscribeSdkEvent("session_switch", fn as (payload: unknown) => void),
-        onReset: (fn: unknown) => this.subscribeSdkEvent("session_reset", fn as (payload: unknown) => void),
+        onToolCall: (fn: (call: ToolCall) => void) => subscribeTypedEvent("tool_call", fn),
+        onToolResult: (fn: (result: ToolResult) => void) => subscribeTypedEvent("tool_result", fn),
+        onMessage: (fn: (message: Message) => void) => subscribeTypedEvent("message", fn),
+        onThinking: (fn: (state: ThinkingState) => void) => subscribeTypedEvent("thinking", fn),
+        onFork: (fn: (branch: Branch) => void) => subscribeTypedEvent("session_fork", fn),
+        onSwitch: (fn: (branch: Branch) => void) => subscribeTypedEvent("session_switch", fn),
+        onReset: (fn: () => void) =>
+          this.subscribeSdkEvent("session_reset", () => {
+            fn();
+          }),
       },
       context: {
         get: async (): Promise<SessionContext> => {
