@@ -14,6 +14,11 @@ export class ApexSessionStore {
 
     if (this.sessionId) {
       this.snapshot = await this.fetchSnapshot(this.sessionId);
+      if (!this.snapshot) {
+        console.warn(
+          `[ApexSessionStore] Session ${this.sessionId} not found, waiting for registration...`
+        );
+      }
     } else {
       this.snapshot = await this.fetchCurrentSnapshot();
       this.sessionId = this.snapshot?.session.id ?? null;

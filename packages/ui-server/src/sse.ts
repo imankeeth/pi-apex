@@ -17,12 +17,8 @@ function encodeLine(line: string): Uint8Array {
 }
 
 function encodeEvent(event: ApexEvent): Uint8Array {
-  const data = JSON.stringify({
-    type: event.type,
-    payload: event.payload,
-    ts: event.ts,
-  });
-  return encoder.encode(`data: ${data}\n\n`);
+  const eventData = JSON.stringify({ type: event.type, payload: event.payload, ts: event.ts });
+  return encoder.encode(`data: ${eventData}\n\n`);
 }
 
 export function createSSEStream(sessionId: string): Response {

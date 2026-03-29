@@ -63,9 +63,14 @@ const app = new Hono();
 
 app.use("*", async (c, next) => {
   await next();
-  c.res.headers.set("Access-Control-Allow-Origin", "*");
+  const origin = c.req.header("Origin");
+  const requestOrigin = new URL(c.req.url).origin;
+  if (origin && origin === requestOrigin) {
+    c.res.headers.set("Access-Control-Allow-Origin", origin);
+    c.res.headers.set("Access-Control-Allow-Credentials", "true");
+  }
   c.res.headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  c.res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  c.res.headers.delete("Access-Control-Allow-Headers");
 });
 
 app.options("*", () => new Response(null, { status: 204 }));

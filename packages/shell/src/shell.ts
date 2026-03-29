@@ -136,6 +136,9 @@ class PiApexShell {
     await this.sessionStore.init(targetSessionId);
     await this.loadExtensions();
     this.buildTabBar();
+    if (!this.sessionStore) {
+      throw new Error("Session store failed to initialize");
+    }
     this.sdkBridge = this.buildSdkBridge(this.sessionStore);
     const defaultTab = this.config.defaults?.activeTab ?? this.firstExtensionId();
     if (defaultTab) this.activateTab(defaultTab);
@@ -200,15 +203,15 @@ class PiApexShell {
     return {
       session: {
         getMessages: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.messages ?? []) as Message[];
         },
         getThread: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.thread ?? []) as ThreadNode[];
         },
         getBranches: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.branches ?? []) as Branch[];
         },
         fork: async (label?: string) => {
@@ -231,7 +234,7 @@ class PiApexShell {
           await postAction("session.compact");
         },
         getActiveBranch: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           const branches = (snapshot?.branches ?? []) as Branch[];
           return branches.find((branch) => branch.isActive) ?? null;
         },
@@ -259,7 +262,7 @@ class PiApexShell {
       },
       tools: {
         getAll: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.tools ?? []) as ToolDef[];
         },
         getActive: () => store.get()?.activeTools ?? [],
@@ -285,7 +288,7 @@ class PiApexShell {
       },
       context: {
         get: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return {
             cwd: snapshot?.session.cwd ?? "",
             projectName: snapshot?.session.projectName ?? "",
@@ -393,7 +396,7 @@ class PiApexShell {
 
     iframe.onload = () => {
       if (iframe.contentWindow) {
-        ext.bridge?.setTargetOrigin("*");
+        ext.bridge?.setTargetOrigin(window.location.origin);
       }
       const cleanup = ext.entry.mount(ext.bridge as unknown as PiSDK);
       if (typeof cleanup === "function") ext.unmount = cleanup;

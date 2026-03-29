@@ -3,19 +3,20 @@ import type { ApexEvent } from "@pi-apex/types";
 type EventHandler = (event: ApexEvent) => void;
 type ErrorHandler = () => void;
 
-function parseEvent(data: string): ApexEvent | null {
+function parseEvent(data: string): ApexEvent {
   try {
-    const parsed = JSON.parse(data) as { type?: unknown; payload?: unknown; ts?: unknown };
-    if (typeof parsed.type !== "string") {
-      return null;
-    }
+    const parsed = JSON.parse(data) as { type?: unknown; payload?: unknown; ts?: number };
     return {
       type: parsed.type as ApexEvent["type"],
       payload: parsed.payload,
       ts: typeof parsed.ts === "number" ? parsed.ts : Date.now(),
     };
   } catch {
-    return null;
+    return {
+      type: "message" as ApexEvent["type"],
+      payload: data,
+      ts: Date.now(),
+    };
   }
 }
 
