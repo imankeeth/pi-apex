@@ -5,7 +5,7 @@
   "main": "./dist/bundle.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc",
     "preview": "vite preview"
   },
   "dependencies": {

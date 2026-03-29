@@ -2,10 +2,12 @@ import type { ApexEvent, ApexSessionSnapshot } from "@pi-apex/types";
 import { BrowserEventSource } from "./sse-client.js";
 
 type Subscriber = (snapshot: ApexSessionSnapshot | null) => void;
+type EventSubscriber = (event: ApexEvent) => void;
 
 export class ApexSessionStore {
   private snapshot: ApexSessionSnapshot | null = null;
   private subscribers = new Set<Subscriber>();
+  private eventSubscribers = new Set<EventSubscriber>();
   private eventSource: BrowserEventSource | null = null;
   private sessionId: string | null = null;
 
@@ -38,8 +40,20 @@ export class ApexSessionStore {
     };
   }
 
+  subscribeToEvents(cb: EventSubscriber): () => void {
+    this.eventSubscribers.add(cb);
+    return () => {
+      this.eventSubscribers.delete(cb);
+    };
+  }
+
   get(): ApexSessionSnapshot | null {
     return this.snapshot;
+  }
+
+  replace(snapshot: ApexSessionSnapshot | null): void {
+    this.snapshot = snapshot;
+    this.notify();
   }
 
   private async fetchCurrentSnapshot(): Promise<ApexSessionSnapshot | null> {
@@ -74,29 +88,29 @@ export class ApexSessionStore {
   private async handleEvent(event: ApexEvent): Promise<void> {
     if (!this.sessionId) return;
 
-    if (this.snapshot) {
-      switch (event.type) {
-        case "message":
-        case "message_delta":
-        case "tool_call":
-        case "tool_result":
-        case "thinking":
-          this.notify();
-          return;
-        case "session_registered":
-        case "session_updated":
-        case "status":
-        case "extension_notification":
-        case "extension_command_registered":
-        case "extension_state_changed":
-          this.snapshot = await this.fetchSnapshot(this.sessionId);
-          this.notify();
-          return;
-        default:
-          this.snapshot = await this.fetchSnapshot(this.sessionId);
-          this.notify();
-          return;
+    for (const subscriber of this.eventSubscribers) {
+      try {
+        subscriber(event);
+      } catch {
+        // Ignore subscriber failures.
       }
+    }
+
+    if (
+      event.type === "session_registered" ||
+      event.type === "session_updated" ||
+      event.type === "message" ||
+      event.type === "message_delta" ||
+      event.type === "tool_call" ||
+      event.type === "tool_result" ||
+      event.type === "thinking" ||
+      event.type === "status" ||
+      event.type === "extension_notification" ||
+      event.type === "extension_command_registered" ||
+      event.type === "extension_state_changed"
+    ) {
+      this.snapshot = await this.fetchSnapshot(this.sessionId);
+      this.notify();
     }
   }
 

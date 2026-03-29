@@ -11,8 +11,24 @@ export interface SessionContext {
   cwd: string;
   projectName: string;
   gitBranch: string | null;
+  model?: string | null;
   env: Record<string, string>;
   files: string[] | null;
+}
+
+export interface ApexSessionSnapshot {
+  session: {
+    id: string;
+    cwd: string;
+    projectName: string;
+    gitBranch: string | null;
+    model?: string | null;
+  };
+  messages: Message[];
+  thread: ThreadNode[];
+  branches: Branch[];
+  tools: ToolDef[];
+  activeTools: string[];
 }
 
 // --- Messaging ---
@@ -149,21 +165,26 @@ export interface SessionAPI {
   getThread(): Promise<ThreadNode[]>;
   getBranches(): Promise<Branch[]>;
   fork(label?: string): Promise<Branch>;
-  switch(branchId: string): void;
+  switch(branchId: string): Promise<void>;
+  abort(): Promise<void>;
+  compact(): Promise<void>;
   getActiveBranch(): Promise<Branch | null>;
 }
 
 export interface MessagingAPI {
-  send(text: string, options?: SendOptions): void;
-  sendAsUser(text: string): void;
-  sendAsSystem(text: string): void;
-  append(type: string, data: unknown): void;
+  send(text: string, options?: SendOptions): Promise<void>;
+  sendAsUser(text: string): Promise<void>;
+  sendAsSystem(text: string): Promise<void>;
+  prompt(text: string, options?: SendOptions): Promise<void>;
+  steer(text: string): Promise<void>;
+  followUp(text: string): Promise<void>;
+  append(type: string, data: unknown): Promise<void>;
 }
 
 export interface ToolsAPI {
   getAll(): Promise<ToolDef[]>;
-  getActive(): string[];
-  setActive(names: string[]): void;
+  getActive(): Promise<string[]>;
+  setActive(names: string[]): Promise<void>;
   call(name: string, args: Record<string, unknown>): Promise<ToolResult>;
   intercept(name: string, handler: InterceptHandler): void;
 }

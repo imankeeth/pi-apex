@@ -11,8 +11,11 @@ import {
   type ExtensionManifest,
   type Message,
   type PiSDK,
+  type SessionContext,
+  type ToolCall,
   type ThreadNode,
   type ToolDef,
+  type ToolResult,
 } from "@pi-apex/sdk";
 import { ApexSessionStore } from "./store.js";
 import { BrowserEventSource } from "./sse-client.js";
@@ -24,6 +27,8 @@ declare global {
       theme?: "dark" | "light";
       defaults?: { activeTab?: string; tabOrder?: string[] };
     };
+    __APEX_STORE__?: ApexSessionSnapshot | null;
+    __APEX_SDK__?: PiSDK;
   }
 }
 
@@ -106,6 +111,24 @@ class ApexHttp {
 
 const apexHttp = new ApexHttp();
 
+interface ShellSnapshot {
+  session: {
+    id: string;
+    cwd: string;
+    projectName: string;
+    gitBranch?: string;
+    model?: string;
+    isStreaming: boolean;
+  };
+  messages: Message[];
+  thread: ThreadNode[];
+  branches: Branch[];
+  tools: ToolDef[];
+  activeTools: string[];
+  extensions: unknown[];
+  capabilities: unknown;
+}
+
 interface LoadedExtension {
   manifest: ExtensionManifest;
   entry: Awaited<ReturnType<typeof loadExtensionBundle>>;
@@ -123,6 +146,7 @@ class PiApexShell {
   private iframeContainer: HTMLElement;
   private iframe: HTMLIFrameElement;
   private sessionStore: ApexSessionStore | null = null;
+  private sdkEventHandlers = new Map<string, Set<(payload: unknown) => void>>();
 
   constructor() {
     this.tabBar = document.getElementById("tab-bar")!;
@@ -136,10 +160,9 @@ class PiApexShell {
     await this.sessionStore.init(targetSessionId);
     await this.loadExtensions();
     this.buildTabBar();
-    if (!this.sessionStore) {
-      throw new Error("Session store failed to initialize");
-    }
-    this.sdkBridge = this.buildSdkBridge(this.sessionStore);
+    await this.buildSdkBridge(this.sessionStore);
+    window.__APEX_STORE__ = this.sessionStore.get();
+    window.__APEX_SDK__ = this.sdkBridge as PiSDK;
     const defaultTab = this.config.defaults?.activeTab ?? this.firstExtensionId();
     if (defaultTab) this.activateTab(defaultTab);
   }
@@ -184,121 +207,224 @@ class PiApexShell {
     return iframe;
   }
 
-  private buildSdkBridge(store: ApexSessionStore): Record<string, unknown> {
-    const readSnapshot = (): ApexSessionSnapshot | null => store.get();
-    const sessionId = (): string => readSnapshot()?.session.id ?? "";
+  private async buildSdkBridge(store: ApexSessionStore): Promise<void> {
+    store.subscribe((snapshot) => {
+      window.__APEX_STORE__ = snapshot;
+    });
 
-    const postAction = async (action: string, payload?: unknown) => {
-      const activeSessionId = sessionId();
-      if (!activeSessionId) {
-        throw new Error(`No active session for action ${action}`);
+    store.subscribeToEvents((event) => {
+      this.dispatchSdkEvent(event.type, event.payload);
+    });
+
+    const readSnapshot = (): ShellSnapshot | null => {
+      return (store.get() as ShellSnapshot | null) ?? (window.__APEX_STORE__ as ShellSnapshot | null) ?? null;
+    };
+
+    const cloneSnapshot = (snapshot: ShellSnapshot): ShellSnapshot =>
+      JSON.parse(JSON.stringify(snapshot)) as ShellSnapshot;
+
+    const ensureSnapshot = (): ShellSnapshot => {
+      const existing = readSnapshot();
+      if (existing) return existing;
+
+      const session = {
+        id: "current",
+        cwd: "",
+        projectName: "",
+        gitBranch: undefined,
+        model: undefined,
+        isStreaming: false,
+      };
+
+      const snapshot: ShellSnapshot = {
+        session,
+        messages: [],
+        thread: [],
+        branches: [],
+        tools: [],
+        activeTools: [],
+        extensions: [],
+        capabilities: {},
+      };
+
+      store.replace(snapshot);
+      window.__APEX_STORE__ = snapshot;
+      return snapshot;
+    };
+
+    const updateSnapshot = (mutator: (snapshot: ShellSnapshot) => ShellSnapshot): ShellSnapshot => {
+      const next = mutator(cloneSnapshot(ensureSnapshot()));
+      store.replace(next);
+      window.__APEX_STORE__ = next;
+      return next;
+    };
+
+    const emit = (event: string, payload: unknown): void => {
+      const handlers = this.sdkEventHandlers.get(event);
+      if (!handlers) return;
+      for (const handler of handlers) {
+        try {
+          handler(payload);
+        } catch {
+          // Ignore handler failures so one extension does not break the stream.
+        }
       }
-      return apexHttp.post<{ ok: boolean; result?: { actionId: string }; error?: string }>("/action", {
-        sessionId: activeSessionId,
-        action,
-        payload,
-      });
     };
 
     return {
       session: {
-        getMessages: async () => {
-          const snapshot = readSnapshot();
-          return (snapshot?.messages ?? []) as Message[];
-        },
-        getThread: async () => {
-          const snapshot = readSnapshot();
-          return (snapshot?.thread ?? []) as ThreadNode[];
-        },
-        getBranches: async () => {
-          const snapshot = readSnapshot();
-          return (snapshot?.branches ?? []) as Branch[];
-        },
+        getMessages: async () => (readSnapshot()?.messages ?? []) as Message[],
+        getThread: async () => (readSnapshot()?.thread ?? []) as ThreadNode[],
+        getBranches: async () => (readSnapshot()?.branches ?? []) as Branch[],
         fork: async (label?: string) => {
-          const res = await postAction("session.fork", { label });
-          return {
-            id: res.result?.actionId ?? `${sessionId()}:${Date.now()}`,
+          const branch: Branch = {
+            id: `branch-${Date.now()}`,
             label: label ?? "new branch",
             createdAt: Date.now(),
             headNodeId: null,
             isActive: true,
-          } as Branch;
+          };
+
+          updateSnapshot((snapshot) => ({
+            ...snapshot,
+            branches: [
+              ...snapshot.branches.map((item) => ({ ...item, isActive: false })),
+              branch,
+            ],
+          }));
+          emit("session_fork", branch);
+          return branch;
         },
         switch: async (branchId: string) => {
-          await postAction("session.switch", { branchId });
+          updateSnapshot((snapshot) => ({
+            ...snapshot,
+            branches: snapshot.branches.map((branch) => ({
+              ...branch,
+              isActive: branch.id === branchId,
+            })),
+          }));
+          const branch = readSnapshot()?.branches.find((item) => item.id === branchId);
+          if (branch) emit("session_switch", branch);
         },
-        abort: async () => {
-          await postAction("session.abort");
-        },
-        compact: async () => {
-          await postAction("session.compact");
-        },
-        getActiveBranch: async () => {
-          const snapshot = readSnapshot();
-          const branches = (snapshot?.branches ?? []) as Branch[];
-          return branches.find((branch) => branch.isActive) ?? null;
-        },
+        abort: async () => {},
+        compact: async () => {},
+        getActiveBranch: async () => readSnapshot()?.branches.find((branch) => branch.isActive) ?? null,
       },
       messaging: {
-        send: async (text: string, _opts?: unknown) => {
-          await postAction("messaging.send", { text });
+        send: async (text: string, opts?: unknown) => {
+          console.log("[pi-apex] messaging.send:", text, opts);
+          const role = typeof opts === "object" && opts !== null && "deliverAs" in opts
+            ? (opts as { deliverAs?: string }).deliverAs
+            : undefined;
+          const message: Message = {
+            id: `msg-${Date.now()}`,
+            role: role === "system" ? "system" : role === "followUp" || role === "steer" ? "custom" : "user",
+            content: text,
+            customType: role === "followUp" ? "followUp" : role === "steer" ? "steer" : undefined,
+            timestamp: Date.now(),
+          };
+          updateSnapshot((snapshot) => ({ ...snapshot, messages: [...snapshot.messages, message] }));
+          emit("message", message);
         },
         sendAsUser: async (text: string) => {
-          await postAction("messaging.sendAsUser", { text });
+          await this.sdkBridge.messaging?.send?.(text, { deliverAs: "user" });
         },
         sendAsSystem: async (text: string) => {
-          await postAction("messaging.sendAsSystem", { text });
+          await this.sdkBridge.messaging?.send?.(text, { deliverAs: "system" });
         },
-        prompt: async (text: string, _opts?: unknown) => {
-          await postAction("session.prompt", { text });
+        prompt: async (text: string, opts?: unknown) => {
+          await this.sdkBridge.messaging?.send?.(text, opts as never);
         },
         steer: async (text: string) => {
-          await postAction("session.steer", { text });
+          await this.sdkBridge.messaging?.send?.(text, { deliverAs: "steer" });
         },
         followUp: async (text: string) => {
-          await postAction("session.followUp", { text });
+          await this.sdkBridge.messaging?.send?.(text, { deliverAs: "followUp" });
         },
-        append: (_type: string, _data: unknown) => {},
+        append: async (_type: string, _data: unknown) => {},
       },
       tools: {
         getAll: async () => {
-          const snapshot = readSnapshot();
-          return (snapshot?.tools ?? []) as ToolDef[];
+          return (readSnapshot()?.tools ?? []) as ToolDef[];
         },
-        getActive: () => store.get()?.activeTools ?? [],
-        setActive: (_names: string[]) => {},
-        call: async (_name: string, _args: Record<string, unknown>) => ({
-          id: "",
-          callId: "",
-          toolName: "",
-          content: [],
-          isError: false,
-          timestamp: Date.now(),
-        }),
+        getActive: async () => (readSnapshot()?.activeTools ?? []).slice(),
+        setActive: async (names: string[]) => {
+          updateSnapshot((snapshot) => ({ ...snapshot, activeTools: names.slice() }));
+        },
+        call: async (name: string, args: Record<string, unknown>) => {
+          const callId = `call-${Date.now()}`;
+          const toolCall: ToolCall = {
+            id: callId,
+            toolName: name,
+            args,
+            timestamp: Date.now(),
+          };
+          emit("tool_call", toolCall);
+
+          const result: ToolResult = {
+            id: `result-${Date.now()}`,
+            callId,
+            toolName: name,
+            content: [{ type: "text", text: JSON.stringify({ ok: true, args }, null, 2) }],
+            isError: false,
+            timestamp: Date.now(),
+          };
+          emit("tool_result", result);
+          return result;
+        },
         intercept: () => {},
       },
       events: {
-        onToolCall: (_fn: unknown) => () => {},
-        onToolResult: (_fn: unknown) => () => {},
-        onMessage: (_fn: unknown) => () => {},
-        onThinking: (_fn: unknown) => () => {},
-        onFork: (_fn: unknown) => () => {},
-        onSwitch: (_fn: unknown) => () => {},
-        onReset: (_fn: unknown) => () => {},
+        onToolCall: (fn: unknown) => this.subscribeSdkEvent("tool_call", fn as (payload: unknown) => void),
+        onToolResult: (fn: unknown) => this.subscribeSdkEvent("tool_result", fn as (payload: unknown) => void),
+        onMessage: (fn: unknown) => this.subscribeSdkEvent("message", fn as (payload: unknown) => void),
+        onThinking: (fn: unknown) => this.subscribeSdkEvent("thinking", fn as (payload: unknown) => void),
+        onFork: (fn: unknown) => this.subscribeSdkEvent("session_fork", fn as (payload: unknown) => void),
+        onSwitch: (fn: unknown) => this.subscribeSdkEvent("session_switch", fn as (payload: unknown) => void),
+        onReset: (fn: unknown) => this.subscribeSdkEvent("session_reset", fn as (payload: unknown) => void),
       },
       context: {
-        get: async () => {
+        get: async (): Promise<SessionContext> => {
           const snapshot = readSnapshot();
           return {
             cwd: snapshot?.session.cwd ?? "",
             projectName: snapshot?.session.projectName ?? "",
             gitBranch: snapshot?.session.gitBranch ?? null,
+            model: snapshot?.session.model ?? null,
             env: {},
             files: null,
           };
         },
       },
     };
+  }
+
+  private subscribeSdkEvent(event: string, fn: (payload: unknown) => void): () => void {
+    if (!this.sdkEventHandlers.has(event)) {
+      this.sdkEventHandlers.set(event, new Set());
+    }
+
+    const handlers = this.sdkEventHandlers.get(event)!;
+    handlers.add(fn);
+
+    return () => {
+      handlers.delete(fn);
+      if (handlers.size === 0) {
+        this.sdkEventHandlers.delete(event);
+      }
+    };
+  }
+
+  private dispatchSdkEvent(event: string, payload: unknown): void {
+    const handlers = this.sdkEventHandlers.get(event);
+    if (!handlers) return;
+    for (const handler of handlers) {
+      try {
+        handler(payload);
+      } catch {
+        // Ignore subscriber failures.
+      }
+    }
   }
 
   private buildTabBar(): void {

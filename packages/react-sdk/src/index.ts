@@ -5,7 +5,10 @@
 // ============================================================================
 
 export { PiProvider, usePi } from "./hooks/usePi.js";
+export { useSessionStore } from "./hooks/useSessionStore.js";
 export { useSession, type UseSessionReturn } from "./hooks/useSession.js";
+export { useThread } from "./hooks/useThread.js";
+export { useMessages } from "./hooks/useMessages.js";
 export { useTools, type UseToolsReturn } from "./hooks/useTools.js";
 export { useMessaging, type UseMessagingReturn } from "./hooks/useMessaging.js";
 export { useContext_ as useContext, type UseContextReturn } from "./hooks/useContext.js";

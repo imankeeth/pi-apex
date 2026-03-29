@@ -12,6 +12,7 @@ export type {
   ContextAPI,
   Unsubscribe,
   SessionContext,
+  ApexSessionSnapshot,
   Message,
   SendOptions,
   ToolDef,
