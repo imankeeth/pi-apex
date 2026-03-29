@@ -14,7 +14,8 @@ export async function registerSession(
   });
 
   if (!res.ok) {
-    throw new Error(`Registration failed: ${res.status}`);
+    const body = await res.text().catch(() => "(no body)");
+    throw new Error(`Registration failed: ${res.status} ${res.statusText}\n${body}`);
   }
 
   return (await res.json()) as RegisterSessionResponse;
@@ -28,14 +29,16 @@ export async function publishEvent(sessionId: string, event: ApexEvent): Promise
   });
 
   if (!res.ok) {
-    throw new Error(`Event publish failed: ${res.status}`);
+    const body = await res.text().catch(() => "(no body)");
+    throw new Error(`Event publish failed: ${res.status} ${res.statusText}\n${body}`);
   }
 }
 
 export async function fetchCurrentSession(): Promise<ApexSessionSnapshot | null> {
   const res = await fetch(`${bridgeBase}/api/apex/session/current`);
   if (!res.ok) {
-    throw new Error(`Failed to fetch current session: ${res.status}`);
+    const body = await res.text().catch(() => "(no body)");
+    throw new Error(`Failed to fetch current session: ${res.status} ${res.statusText}\n${body}`);
   }
 
   return (await res.json()) as ApexSessionSnapshot | null;

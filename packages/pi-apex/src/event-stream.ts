@@ -62,7 +62,7 @@ export class RuntimeEventPublisher {
 
     if (!this.tryAttachEventBus()) {
       this.pollInterval = setInterval(() => {
-        void this.poll();
+        this.poll().catch((err) => console.error("[pi-apex] poll error:", err));
       }, 500);
     }
   }
@@ -87,7 +87,9 @@ export class RuntimeEventPublisher {
 
   emit(type: ApexEventType, payload: unknown): void {
     if (!this.sessionId) return;
-    void publishEvent(this.sessionId, normalizeEvent(type, payload));
+    publishEvent(this.sessionId, normalizeEvent(type, payload)).catch((err) =>
+      console.error("[pi-apex] publish error:", err)
+    );
   }
 
   private tryAttachEventBus(): boolean {
