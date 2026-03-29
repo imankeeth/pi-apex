@@ -12,6 +12,7 @@ export type {
   ContextAPI,
   Unsubscribe,
   SessionContext,
+  ApexSessionSnapshot,
   Message,
   SendOptions,
   ToolDef,
@@ -26,6 +27,7 @@ export type {
   ExtensionManifest,
 } from "./types.js";
 
+export { SDKError } from "./types.js";
 export { IframeBridge, createExtensionBridge } from "./bridge.js";
 export { createExtension, loadExtensionBundle, type ExtensionEntry } from "./extension.js";
 export type { MessageHandler } from "./bridge.js";

@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePi } from "./usePi";
 import type { SessionContext } from "@pi-apex/sdk";
+import { useSessionStore } from "./useSessionStore.js";
 
 export interface UseContextReturn {
   context: SessionContext | null;
@@ -15,6 +16,7 @@ export interface UseContextReturn {
 
 export function useContext_(): UseContextReturn {
   const { context } = usePi();
+  const { snapshot } = useSessionStore();
 
   const [ctx, setCtx] = useState<SessionContext | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -36,6 +38,18 @@ export function useContext_(): UseContextReturn {
   useEffect(() => {
     fetch();
   }, [fetch]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    setCtx({
+      cwd: snapshot.session.cwd,
+      projectName: snapshot.session.projectName ?? "",
+      gitBranch: snapshot.session.gitBranch ?? null,
+      model: snapshot.session.model ?? null,
+      env: {},
+      files: null,
+    });
+  }, [snapshot]);
 
   return { context: ctx, isLoading, error, refetch: fetch };
 }

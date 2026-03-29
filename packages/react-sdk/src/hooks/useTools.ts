@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { usePi } from "./usePi";
 import type { ToolDef, ToolResult, ToolCall, InterceptHandler } from "@pi-apex/sdk";
+import { useSessionStore } from "./useSessionStore.js";
 
 export interface UseToolsReturn {
   tools: ToolDef[];
@@ -19,6 +20,7 @@ export interface UseToolsReturn {
 
 export function useTools(): UseToolsReturn {
   const { tools } = usePi();
+  const { snapshot } = useSessionStore();
 
   const [tools_, setTools] = useState<ToolDef[]>([]);
   const [activeTools, setActiveTools] = useState<string[]>([]);
@@ -31,7 +33,7 @@ export function useTools(): UseToolsReturn {
     try {
       const [all, active] = await Promise.all([
         tools.getAll(),
-        Promise.resolve(tools.getActive()),
+        tools.getActive(),
       ]);
       setTools(all);
       setActiveTools(active);
@@ -46,6 +48,16 @@ export function useTools(): UseToolsReturn {
     fetch();
   }, [fetch]);
 
+  useEffect(() => {
+    if (!snapshot) return;
+    if (Array.isArray(snapshot.tools)) {
+      setTools(snapshot.tools as ToolDef[]);
+    }
+    if (Array.isArray(snapshot.activeTools)) {
+      setActiveTools(snapshot.activeTools as string[]);
+    }
+  }, [snapshot]);
+
   const callTool = useCallback(
     (name: string, args: Record<string, unknown>) => tools.call(name, args),
     [tools]
@@ -53,7 +65,7 @@ export function useTools(): UseToolsReturn {
 
   const setActive = useCallback(
     (names: string[]) => {
-      tools.setActive(names);
+      void tools.setActive(names);
       setActiveTools(names);
     },
     [tools]
