@@ -29,31 +29,19 @@ declare global {
 
 class ApexHttp {
   private base: string;
+  private timeoutMs: number;
 
-  constructor() {
+  constructor(timeoutMs = 10000) {
     this.base = "/api/apex";
+    this.timeoutMs = timeoutMs;
   }
 
   async get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.base}${path}`);
-    if (!res.ok) {
-      throw new Error(`GET ${path} failed (${res.status})`);
-    }
-    return (await res.json()) as T;
+    return this.request<T>("GET", path);
   }
 
   async post<T>(path: string, body: unknown): Promise<T> {
-    const res = await fetch(`${this.base}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      throw new Error(`POST ${path} failed (${res.status})`);
-    }
-
-    return (await res.json()) as T;
+    return this.request<T>("POST", path, body);
   }
 
   eventsource(
@@ -68,6 +56,51 @@ class ApexHttp {
     return {
       close: () => source.close(),
     };
+  }
+
+  private async request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const res = await fetch(`${this.base}${path}`, {
+        method,
+        headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      const text = await res.text();
+      const parsed = text.length > 0 ? (JSON.parse(text) as unknown) : undefined;
+
+      if (!res.ok) {
+        const error =
+          parsed &&
+          typeof parsed === "object" &&
+          "error" in parsed &&
+          typeof (parsed as { error?: unknown }).error === "string"
+            ? ((parsed as { error?: string }).error as string)
+            : `${method} ${path} failed (${res.status})`;
+        throw new Error(error);
+      }
+
+      if (parsed && typeof parsed === "object" && "ok" in parsed && (parsed as { ok?: boolean }).ok === false) {
+        const error =
+          typeof (parsed as { error?: unknown }).error === "string"
+            ? ((parsed as { error?: string }).error as string)
+            : `Action request failed: ${path}`;
+        throw new Error(error);
+      }
+
+      return parsed as T;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(`${method} ${path} timed out after ${this.timeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
   }
 }
 
@@ -85,7 +118,7 @@ class PiApexShell {
   private extensions = new Map<string, LoadedExtension>();
   private activeTabId: string | null = null;
   private config = window.__PI_APEX_CONFIG__;
-  private sdkBridge: Partial<PiSDK> = {};
+  private sdkBridge: Record<string, unknown> = {};
   private tabBar: HTMLElement;
   private iframeContainer: HTMLElement;
   private iframe: HTMLIFrameElement;
@@ -103,7 +136,10 @@ class PiApexShell {
     await this.sessionStore.init(targetSessionId);
     await this.loadExtensions();
     this.buildTabBar();
-    await this.buildSdkBridge(this.sessionStore);
+    if (!this.sessionStore) {
+      throw new Error("Session store failed to initialize");
+    }
+    this.sdkBridge = this.buildSdkBridge(this.sessionStore);
     const defaultTab = this.config.defaults?.activeTab ?? this.firstExtensionId();
     if (defaultTab) this.activateTab(defaultTab);
   }
@@ -148,52 +184,85 @@ class PiApexShell {
     return iframe;
   }
 
-  private async buildSdkBridge(store: ApexSessionStore): Promise<void> {
-    const readSnapshot = async (): Promise<ApexSessionSnapshot | null> => {
-      return store.get() ?? apexHttp.get<ApexSessionSnapshot | null>("/session/current");
+  private buildSdkBridge(store: ApexSessionStore): Record<string, unknown> {
+    const readSnapshot = (): ApexSessionSnapshot | null => store.get();
+    const sessionId = (): string => readSnapshot()?.session.id ?? "";
+
+    const postAction = async (action: string, payload?: unknown) => {
+      const activeSessionId = sessionId();
+      if (!activeSessionId) {
+        throw new Error(`No active session for action ${action}`);
+      }
+      return apexHttp.post<{ ok: boolean; result?: { actionId: string }; error?: string }>("/action", {
+        sessionId: activeSessionId,
+        action,
+        payload,
+      });
     };
 
-    this.sdkBridge = {
+    return {
       session: {
         getMessages: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.messages ?? []) as Message[];
         },
         getThread: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.thread ?? []) as ThreadNode[];
         },
         getBranches: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.branches ?? []) as Branch[];
         },
-        fork: async (label?: string) =>
-          ({
-            id: `branch-${Date.now()}`,
+        fork: async (label?: string) => {
+          const res = await postAction("session.fork", { label });
+          return {
+            id: res.result?.actionId ?? `${sessionId()}:${Date.now()}`,
             label: label ?? "new branch",
             createdAt: Date.now(),
             headNodeId: null,
             isActive: true,
-          }) as Branch,
-        switch: (_branchId: string) => {},
-        getActiveBranch: async () => null,
+          } as Branch;
+        },
+        switch: async (branchId: string) => {
+          await postAction("session.switch", { branchId });
+        },
+        abort: async () => {
+          await postAction("session.abort");
+        },
+        compact: async () => {
+          await postAction("session.compact");
+        },
+        getActiveBranch: async () => {
+          const snapshot = readSnapshot();
+          const branches = (snapshot?.branches ?? []) as Branch[];
+          return branches.find((branch) => branch.isActive) ?? null;
+        },
       },
       messaging: {
-        send: (text: string, _opts?: unknown) => {
-          console.log("[pi-apex] messaging.send:", text);
-          fetch("/api/pi/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: text }),
-          }).catch(console.error);
+        send: async (text: string, _opts?: unknown) => {
+          await postAction("messaging.send", { text });
         },
-        sendAsUser: (text: string) => this.sdkBridge.messaging!.send(text, { deliverAs: "user" }),
-        sendAsSystem: (text: string) => this.sdkBridge.messaging!.send(text, { deliverAs: "system" }),
+        sendAsUser: async (text: string) => {
+          await postAction("messaging.sendAsUser", { text });
+        },
+        sendAsSystem: async (text: string) => {
+          await postAction("messaging.sendAsSystem", { text });
+        },
+        prompt: async (text: string, _opts?: unknown) => {
+          await postAction("session.prompt", { text });
+        },
+        steer: async (text: string) => {
+          await postAction("session.steer", { text });
+        },
+        followUp: async (text: string) => {
+          await postAction("session.followUp", { text });
+        },
         append: (_type: string, _data: unknown) => {},
       },
       tools: {
         getAll: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return (snapshot?.tools ?? []) as ToolDef[];
         },
         getActive: () => store.get()?.activeTools ?? [],
@@ -219,7 +288,7 @@ class PiApexShell {
       },
       context: {
         get: async () => {
-          const snapshot = await readSnapshot();
+          const snapshot = readSnapshot();
           return {
             cwd: snapshot?.session.cwd ?? "",
             projectName: snapshot?.session.projectName ?? "",
@@ -327,7 +396,7 @@ class PiApexShell {
 
     iframe.onload = () => {
       if (iframe.contentWindow) {
-        ext.bridge?.setTargetOrigin("*");
+        ext.bridge?.setTargetOrigin(window.location.origin);
       }
       const cleanup = ext.entry.mount(ext.bridge as unknown as PiSDK);
       if (typeof cleanup === "function") ext.unmount = cleanup;

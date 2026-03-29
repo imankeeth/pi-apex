@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "npm run build --workspace=@pi-apex/types && npm run build --workspace=@pi-apex/sdk && npm run build --workspace=@pi-apex/react-sdk && npm run build --workspace=@pi-apex/runtime && npm run build --workspace=@pi-apex/shell && npm run build --workspace=pi-apex-ui-server",
     "build:sdk": "cd packages/sdk && npm run build",
     "build:react-sdk": "cd packages/react-sdk && npm run build",
     "build:shell": "cd packages/shell && npm run build",
