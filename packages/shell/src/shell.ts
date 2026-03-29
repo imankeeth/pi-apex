@@ -1,10 +1,21 @@
 // ============================================================================
 // pi-apex Shell — client-side runtime.
-// Minimal: loads extensions, manages tabs, wires iframe bridge to SDK.
-// All UI is built via the SDK by extensions.
+// Loads extensions, manages tabs, and wires the SDK bridge to the bridge API.
 // ============================================================================
 
-import { IframeBridge, loadExtensionBundle, type ExtensionManifest, type PiSDK } from "@pi-apex/sdk";
+import type { ApexSessionSnapshot } from "@pi-apex/types";
+import {
+  IframeBridge,
+  loadExtensionBundle,
+  type Branch,
+  type ExtensionManifest,
+  type Message,
+  type PiSDK,
+  type ThreadNode,
+  type ToolDef,
+} from "@pi-apex/sdk";
+import { ApexSessionStore } from "./store.js";
+import { BrowserEventSource } from "./sse-client.js";
 
 declare global {
   interface Window {
@@ -16,7 +27,51 @@ declare global {
   }
 }
 
-// ─── State ────────────────────────────────────────────────────────────────────
+class ApexHttp {
+  private base: string;
+
+  constructor() {
+    this.base = "/api/apex";
+  }
+
+  async get<T>(path: string): Promise<T> {
+    const res = await fetch(`${this.base}${path}`);
+    if (!res.ok) {
+      throw new Error(`GET ${path} failed (${res.status})`);
+    }
+    return (await res.json()) as T;
+  }
+
+  async post<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.base}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      throw new Error(`POST ${path} failed (${res.status})`);
+    }
+
+    return (await res.json()) as T;
+  }
+
+  eventsource(
+    path: string,
+    handlers: { onEvent: (event: unknown) => void; onError?: () => void }
+  ): { close: () => void } {
+    const source = new BrowserEventSource(`${this.base}${path}`);
+    source.onEvent((event) => handlers.onEvent(event));
+    if (handlers.onError) {
+      source.onError(handlers.onError);
+    }
+    return {
+      close: () => source.close(),
+    };
+  }
+}
+
+const apexHttp = new ApexHttp();
 
 interface LoadedExtension {
   manifest: ExtensionManifest;
@@ -34,6 +89,7 @@ class PiApexShell {
   private tabBar: HTMLElement;
   private iframeContainer: HTMLElement;
   private iframe: HTMLIFrameElement;
+  private sessionStore: ApexSessionStore | null = null;
 
   constructor() {
     this.tabBar = document.getElementById("tab-bar")!;
@@ -42,9 +98,12 @@ class PiApexShell {
   }
 
   async start(): Promise<void> {
+    const targetSessionId = new URL(window.location.href).searchParams.get("session");
+    this.sessionStore = new ApexSessionStore();
+    await this.sessionStore.init(targetSessionId);
     await this.loadExtensions();
     this.buildTabBar();
-    await this.buildSdkBridge();
+    await this.buildSdkBridge(this.sessionStore);
     const defaultTab = this.config.defaults?.activeTab ?? this.firstExtensionId();
     if (defaultTab) this.activateTab(defaultTab);
   }
@@ -55,8 +114,6 @@ class PiApexShell {
     }
     return null;
   }
-
-  // ─── Load all extension manifests ─────────────────────────────────────────
 
   private async loadExtensions(): Promise<void> {
     for (const extSource of this.config.extensions) {
@@ -72,7 +129,7 @@ class PiApexShell {
           });
         }
       } catch (err) {
-        console.error(`[pi-apex] Failed to load extension:`, err);
+        console.error("[pi-apex] Failed to load extension:", err);
       }
     }
   }
@@ -80,7 +137,7 @@ class PiApexShell {
   private async fetchManifest(id: string): Promise<ExtensionManifest> {
     const res = await fetch(`/extensions/${id}/manifest.json`);
     if (!res.ok) throw new Error(`Manifest not found: ${id}`);
-    return res.json() as Promise<ExtensionManifest>;
+    return (await res.json()) as ExtensionManifest;
   }
 
   private createIframe(): HTMLIFrameElement {
@@ -91,30 +148,39 @@ class PiApexShell {
     return iframe;
   }
 
-  // ─── Build the SDK bridge — what extensions can call ─────────────────────
+  private async buildSdkBridge(store: ApexSessionStore): Promise<void> {
+    const readSnapshot = async (): Promise<ApexSessionSnapshot | null> => {
+      return store.get() ?? apexHttp.get<ApexSessionSnapshot | null>("/session/current");
+    };
 
-  private async buildSdkBridge(): Promise<void> {
-    // Real implementation wires to pi backend API
-    // For now: mock implementation so extensions work standalone
     this.sdkBridge = {
       session: {
-        getMessages: async () => [],
-        getThread: async () => [],
-        getBranches: async () => [],
-        fork: async (label?: string) => ({
-          id: `branch-${Date.now()}`,
-          label: label ?? "new branch",
-          createdAt: Date.now(),
-          headNodeId: null,
-          isActive: true,
-        }),
+        getMessages: async () => {
+          const snapshot = await readSnapshot();
+          return (snapshot?.messages ?? []) as Message[];
+        },
+        getThread: async () => {
+          const snapshot = await readSnapshot();
+          return (snapshot?.thread ?? []) as ThreadNode[];
+        },
+        getBranches: async () => {
+          const snapshot = await readSnapshot();
+          return (snapshot?.branches ?? []) as Branch[];
+        },
+        fork: async (label?: string) =>
+          ({
+            id: `branch-${Date.now()}`,
+            label: label ?? "new branch",
+            createdAt: Date.now(),
+            headNodeId: null,
+            isActive: true,
+          }) as Branch,
         switch: (_branchId: string) => {},
         getActiveBranch: async () => null,
       },
       messaging: {
         send: (text: string, _opts?: unknown) => {
           console.log("[pi-apex] messaging.send:", text);
-          // Proxy to pi backend
           fetch("/api/pi/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -126,9 +192,12 @@ class PiApexShell {
         append: (_type: string, _data: unknown) => {},
       },
       tools: {
-        getAll: async () => [],
-        getActive: () => [],
-        setActive: () => {},
+        getAll: async () => {
+          const snapshot = await readSnapshot();
+          return (snapshot?.tools ?? []) as ToolDef[];
+        },
+        getActive: () => store.get()?.activeTools ?? [],
+        setActive: (_names: string[]) => {},
         call: async (_name: string, _args: Record<string, unknown>) => ({
           id: "",
           callId: "",
@@ -149,18 +218,19 @@ class PiApexShell {
         onReset: (_fn: unknown) => () => {},
       },
       context: {
-        get: async () => ({
-          cwd: "",
-          projectName: "",
-          gitBranch: null,
-          env: {},
-          files: null,
-        }),
+        get: async () => {
+          const snapshot = await readSnapshot();
+          return {
+            cwd: snapshot?.session.cwd ?? "",
+            projectName: snapshot?.session.projectName ?? "",
+            gitBranch: snapshot?.session.gitBranch ?? null,
+            env: {},
+            files: null,
+          };
+        },
       },
     };
   }
-
-  // ─── Build tab bar ────────────────────────────────────────────────────────
 
   private buildTabBar(): void {
     this.tabBar.innerHTML = "";
@@ -227,13 +297,10 @@ class PiApexShell {
     return btn;
   }
 
-  // ─── Activate a tab ──────────────────────────────────────────────────────
-
   private async activateTab(id: string): Promise<void> {
     const ext = this.extensions.get(id);
     if (!ext) return;
 
-    // Deactivate current tab
     if (this.activeTabId) {
       const prevExt = this.extensions.get(this.activeTabId);
       if (prevExt) {
@@ -244,9 +311,8 @@ class PiApexShell {
     }
 
     this.activeTabId = id;
-    this.buildTabBar(); // re-render to update active state
+    this.buildTabBar();
 
-    // Mount extension iframe
     const iframe = ext.iframe;
     iframe.classList.add("active");
     iframe.style.display = "block";
@@ -255,26 +321,21 @@ class PiApexShell {
       this.iframeContainer.appendChild(iframe);
     }
 
-    // Create bridge for this extension
     ext.bridge = new IframeBridge(iframe, {
       exposed: this.sdkBridge as Record<string, (...args: unknown[]) => unknown>,
     });
 
-    // Wire iframe load → mount extension
     iframe.onload = () => {
       if (iframe.contentWindow) {
         ext.bridge?.setTargetOrigin("*");
       }
-        const cleanup = ext.entry.mount(ext.bridge as unknown as PiSDK);
-        if (typeof cleanup === "function") ext.unmount = cleanup;
+      const cleanup = ext.entry.mount(ext.bridge as unknown as PiSDK);
+      if (typeof cleanup === "function") ext.unmount = cleanup;
     };
 
-    // Load extension bundle
     iframe.src = `/extensions/${id}/bundle.js`;
   }
 }
-
-// ─── Start ────────────────────────────────────────────────────────────────────
 
 const shell = new PiApexShell();
 shell.start().catch(console.error);

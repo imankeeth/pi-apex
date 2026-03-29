@@ -3,8 +3,9 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "declaration": false,
-    "outDir": "../../dist/shell",
+    "declaration": true,
+    "composite": true,
+    "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -12,15 +13,14 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@pi-apex/sdk": ["../sdk/src/index.ts"],
       "@pi-apex/types": ["../types/src/index.ts"]
     }
   },
   "include": ["src/**/*"],
   "references": [
-    { "path": "../sdk" },
     { "path": "../types" }
   ]
 }

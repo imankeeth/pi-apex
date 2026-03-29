@@ -16,7 +16,8 @@
     "watch": "tsc --watch"
   },
   "dependencies": {
-    "@pi-apex/sdk": "file:../sdk"
+    "@pi-apex/sdk": "file:../sdk",
+    "@pi-apex/types": "file:../types"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

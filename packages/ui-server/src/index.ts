@@ -8,6 +8,10 @@ import { Hono } from "hono";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ApexEventEnvelope, RegisterSessionRequest, RegisterSessionResponse } from "@pi-apex/types";
+import { broadcastEvent } from "./events.js";
+import { registry } from "./registry.js";
+import { createSSEStream } from "./sse.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "../../.."); // pi-apex root
@@ -57,7 +61,7 @@ app.use("*", async (c, next) => {
   c.res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 });
 
-app.options("*", (c) => c.text("", 204));
+app.options("*", () => new Response(null, { status: 204 }));
 
 // ─── Shell HTML ───────────────────────────────────────────────────────────────
 
@@ -135,6 +139,55 @@ app.get("/extensions/:id/bundle.js", (c) => {
   }
 });
 
+// ─── Bridge API ───────────────────────────────────────────────────────────────
+
+app.get("/api/apex/sessions", (c) => {
+  return c.json({
+    sessions: registry.list(),
+    currentSessionId: registry.getCurrentSessionId(),
+  });
+});
+
+app.get("/api/apex/session/current", (c) => {
+  const session = registry.getCurrent();
+  return c.json(session);
+});
+
+app.get("/api/apex/session/:id", (c) => {
+  const { id } = c.req.param();
+  const session = registry.get(id);
+  if (!session) {
+    return c.json(null, 404);
+  }
+  return c.json(session);
+});
+
+app.get("/api/apex/session/:id/events", (c) => {
+  const { id } = c.req.param();
+  return createSSEStream(id);
+});
+
+app.post("/api/apex/runtime/event", async (c) => {
+  const body = (await c.req.json()) as ApexEventEnvelope;
+  broadcastEvent(body.sessionId, body.event);
+  return c.json({ ok: true });
+});
+
+app.post("/api/apex/runtime/register", async (c) => {
+  const body = (await c.req.json()) as RegisterSessionRequest;
+  const sessionId = registry.register(body);
+  registry.setCurrent(sessionId);
+
+  const url = new URL(`/api/apex/session/${sessionId}`, c.req.url).toString();
+  const response: RegisterSessionResponse = {
+    ok: true,
+    sessionId,
+    url,
+  };
+
+  return c.json(response);
+});
+
 // ─── pi backend proxy ─────────────────────────────────────────────────────────
 
 app.all("/api/pi/:path*", async (c) => {
@@ -150,9 +203,7 @@ app.all("/api/pi/:path*", async (c) => {
       headers: {
         "Content-Type": "application/json",
         ...Object.fromEntries(
-          Object.entries(c.req.headers).filter(([k]) =>
-            !["content-length", "content-type"].includes(k.toLowerCase())
-          )
+          [...c.req.raw.headers.entries()].filter(([k]) => !["content-length", "content-type"].includes(k.toLowerCase()))
         ),
       },
       body: c.req.method !== "GET" && body ? body : undefined,
