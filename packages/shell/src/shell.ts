@@ -502,10 +502,8 @@ class PiApexShell {
 
       const current = sessions.sessions.find((session) => session.id === sessions.currentSessionId);
       sessionIndicator.textContent = current?.projectName ?? current?.cwd ?? "session";
-      sessionIndicator.title = `${sessions.sessions.length} sessions — click to switch`;
-      sessionIndicator.addEventListener("click", () => {
-        console.log("Sessions:", sessions.sessions);
-      });
+      sessionIndicator.title = `${sessions.sessions.length} sessions registered`;
+      sessionIndicator.style.cursor = "default";
 
       this.tabBar.appendChild(sessionIndicator);
     } catch (err) {

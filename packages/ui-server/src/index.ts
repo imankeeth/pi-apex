@@ -8,17 +8,29 @@ import { Hono } from "hono";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  ApexActionRequest,
-  ApexActionResponse,
-  ApexEventEnvelope,
-  RegisterSessionRequest,
-  RegisterSessionResponse,
-} from "@pi-apex/types";
-import { actionQueue } from "./action-queue.js";
+import type { ApexEventEnvelope, RegisterSessionRequest, RegisterSessionResponse } from "@pi-apex/types";
+import type { ApexActionRequest, ApexActionResponse, RuntimeActionEnvelope } from "@pi-apex/types";
 import { broadcastEvent } from "./events.js";
 import { registry } from "./registry.js";
 import { createSSEStream } from "./sse.js";
+
+const actionQueues = new Map<string, RuntimeActionEnvelope[]>();
+
+function enqueueAction(request: ApexActionRequest): RuntimeActionEnvelope {
+  const envelope: RuntimeActionEnvelope = {
+    id: `${request.sessionId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+    sessionId: request.sessionId,
+    action: request.action,
+    payload: request.payload,
+    createdAt: Date.now(),
+  };
+
+  const queue = actionQueues.get(request.sessionId) ?? [];
+  queue.push(envelope);
+  actionQueues.set(request.sessionId, queue);
+
+  return envelope;
+}
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "../../.."); // pi-apex root
@@ -218,8 +230,29 @@ app.post("/api/apex/runtime/register", async (c) => {
 });
 
 app.post("/api/apex/action", async (c) => {
-  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
-  return c.json({ ok: true, received: body });
+  const body = (await c.req.json().catch(() => ({}))) as Partial<ApexActionRequest>;
+
+  if (!body.sessionId || !body.action) {
+    return c.json({ ok: false, error: "Missing sessionId or action" } satisfies ApexActionResponse, 400);
+  }
+
+  const resolvedSessionId = body.sessionId === "current" ? registry.getCurrentSessionId() : body.sessionId;
+  if (!resolvedSessionId) {
+    return c.json({ ok: false, error: "No current session" } satisfies ApexActionResponse, 404);
+  }
+
+  const session = registry.get(resolvedSessionId);
+  if (!session) {
+    return c.json({ ok: false, error: `Unknown session: ${resolvedSessionId}` } satisfies ApexActionResponse, 404);
+  }
+
+  const action = enqueueAction({
+    sessionId: resolvedSessionId,
+    action: body.action,
+    payload: body.payload,
+  });
+
+  return c.json({ ok: true, result: { actionId: action.id } } satisfies ApexActionResponse);
 });
 
 // ─── pi backend proxy ─────────────────────────────────────────────────────────

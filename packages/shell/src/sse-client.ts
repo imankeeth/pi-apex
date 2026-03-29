@@ -6,7 +6,11 @@ type ErrorHandler = () => void;
 function parseEvent(data: string): ApexEvent {
   try {
     const parsed = JSON.parse(data) as { type?: unknown; payload?: unknown; ts?: unknown };
-    if (typeof parsed.type !== "string") return null;
+
+    if (typeof parsed.type !== "string") {
+      return null;
+    }
+
     return {
       type: parsed.type as ApexEvent["type"],
       payload: parsed.payload,

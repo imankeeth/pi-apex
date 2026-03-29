@@ -19,6 +19,7 @@ export function ExtensionPanel({ onClose }: { onClose: () => void }): JSX.Elemen
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [commandError, setCommandError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,10 +65,9 @@ export function ExtensionPanel({ onClose }: { onClose: () => void }): JSX.Elemen
 
       <div style={panelListStyle}>
         {error ? <div style={panelMessageStyle}>{error}</div> : null}
+        {commandError ? <div style={{ ...panelMessageStyle, color: "#ef4444" }}>{commandError}</div> : null}
 
-        {!error && extensions.length === 0 ? (
-          <div style={panelMessageStyle}>No extensions registered</div>
-        ) : null}
+        {!error && extensions.length === 0 ? <div style={panelMessageStyle}>No extensions registered</div> : null}
 
         {extensions.map((extension) => (
           <div key={extension.id} style={itemStyle}>
@@ -96,16 +96,26 @@ export function ExtensionPanel({ onClose }: { onClose: () => void }): JSX.Elemen
                         key={command.name}
                         type="button"
                         style={commandButtonStyle}
-                        onClick={() => {
-                          fetch("/api/apex/action", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              sessionId: "current",
-                              action: "extension.command.run",
-                              payload: { commandId: command.name },
-                            }),
-                          }).catch(() => {});
+                        onClick={async () => {
+                          try {
+                            const response = await fetch("/api/apex/action", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                sessionId: "current",
+                                action: "extension.command.run",
+                                payload: { commandId: command.name },
+                              }),
+                            });
+
+                            if (!response.ok) {
+                              throw new Error(`HTTP ${response.status}`);
+                            }
+                          } catch (err) {
+                            console.error("[pi-apex] Extension command failed:", err);
+                            setCommandError(`Failed: ${String(err)}`);
+                            globalThis.setTimeout(() => setCommandError(null), 3000);
+                          }
                         }}
                       >
                         <span style={commandNameStyle}>/{command.name}</span>
