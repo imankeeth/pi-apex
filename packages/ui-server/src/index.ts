@@ -8,7 +8,14 @@ import { Hono } from "hono";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ApexEventEnvelope, RegisterSessionRequest, RegisterSessionResponse } from "@pi-apex/types";
+import type {
+  ApexActionRequest,
+  ApexActionResponse,
+  ApexEventEnvelope,
+  RegisterSessionRequest,
+  RegisterSessionResponse,
+} from "@pi-apex/types";
+import { actionQueue } from "./action-queue.js";
 import { broadcastEvent } from "./events.js";
 import { registry } from "./registry.js";
 import { createSSEStream } from "./sse.js";
@@ -186,6 +193,32 @@ app.post("/api/apex/runtime/register", async (c) => {
   };
 
   return c.json(response);
+});
+
+app.post("/api/apex/action", async (c) => {
+  const body = (await c.req.json()) as ApexActionRequest;
+  const action = actionQueue.enqueue(body.sessionId, body);
+  const response: ApexActionResponse = {
+    ok: true,
+    result: { actionId: action.id },
+  };
+  return c.json(response);
+});
+
+app.get("/api/apex/runtime/actions/:sessionId", (c) => {
+  const { sessionId } = c.req.param();
+  return c.json(actionQueue.dequeueAll(sessionId));
+});
+
+app.post("/api/apex/runtime/action-result", async (c) => {
+  const body = (await c.req.json()) as {
+    actionId: string;
+    ok: boolean;
+    result?: unknown;
+    error?: string;
+  };
+  actionQueue.submitResult(body);
+  return c.json({ ok: true });
 });
 
 // ─── pi backend proxy ─────────────────────────────────────────────────────────
