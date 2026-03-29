@@ -17,9 +17,7 @@ export class ApexSessionStore {
     if (this.sessionId) {
       this.snapshot = await this.fetchSnapshot(this.sessionId);
       if (!this.snapshot) {
-        console.warn(
-          `[ApexSessionStore] Session ${this.sessionId} not found, waiting for registration...`
-        );
+        console.warn(`[pi-apex] Session not found during init: ${this.sessionId}`);
       }
     } else {
       this.snapshot = await this.fetchCurrentSnapshot();

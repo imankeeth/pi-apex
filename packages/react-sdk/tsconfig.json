@@ -11,18 +11,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": {
-      "@pi-apex/sdk": ["../sdk/src/index.ts"],
-      "@pi-apex/types": ["../types/src/index.ts"]
-    },
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*"],
-  "exclude": ["src/components/**/*"],
-  "references": [
-    { "path": "../sdk" },
-    { "path": "../types" }
-  ]
+  "exclude": ["src/components/**/*"]
 }

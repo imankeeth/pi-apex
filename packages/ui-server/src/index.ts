@@ -8,17 +8,29 @@ import { Hono } from "hono";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  ApexActionRequest,
-  ApexActionResponse,
-  ApexEventEnvelope,
-  RegisterSessionRequest,
-  RegisterSessionResponse,
-} from "@pi-apex/types";
-import { actionQueue } from "./action-queue.js";
+import type { ApexEventEnvelope, RegisterSessionRequest, RegisterSessionResponse } from "@pi-apex/types";
+import type { ApexActionRequest, ApexActionResponse, RuntimeActionEnvelope } from "@pi-apex/types";
 import { broadcastEvent } from "./events.js";
 import { registry } from "./registry.js";
 import { createSSEStream } from "./sse.js";
+
+const actionQueues = new Map<string, RuntimeActionEnvelope[]>();
+
+function enqueueAction(request: ApexActionRequest): RuntimeActionEnvelope {
+  const envelope: RuntimeActionEnvelope = {
+    id: `${request.sessionId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+    sessionId: request.sessionId,
+    action: request.action,
+    payload: request.payload,
+    createdAt: Date.now(),
+  };
+
+  const queue = actionQueues.get(request.sessionId) ?? [];
+  queue.push(envelope);
+  actionQueues.set(request.sessionId, queue);
+
+  return envelope;
+}
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = resolve(__dirname, "../../.."); // pi-apex root
@@ -38,6 +50,13 @@ type ExtensionSource =
   | { type: "builtin"; id: string }
   | { type: "npm"; name: string }
   | { type: "local"; path: string };
+
+const DEFAULT_CAPABILITIES = {
+  session: { fork: false, switch: false, compact: false, abort: false },
+  messaging: { prompt: false, steer: false, followUp: false },
+  ui: { notify: false, confirm: false, input: false, select: false, form: false, customView: false },
+  tools: { call: false, intercept: false },
+};
 
 function loadConfig(): PiApexConfig {
   try {
@@ -160,9 +179,19 @@ app.get("/api/apex/sessions", (c) => {
   });
 });
 
+app.get("/api/apex/extensions", (c) => {
+  const session = registry.getCurrent();
+  return c.json(session?.extensions ?? []);
+});
+
+app.get("/api/apex/capabilities", (c) => {
+  const session = registry.getCurrent();
+  return c.json(session?.capabilities ?? DEFAULT_CAPABILITIES);
+});
+
 app.get("/api/apex/session/current", (c) => {
   const session = registry.getCurrent();
-  return c.json(session);
+  return c.json(session ?? null);
 });
 
 app.get("/api/apex/session/:id", (c) => {
@@ -201,29 +230,29 @@ app.post("/api/apex/runtime/register", async (c) => {
 });
 
 app.post("/api/apex/action", async (c) => {
-  const body = (await c.req.json()) as ApexActionRequest;
-  const action = actionQueue.enqueue(body.sessionId, body);
-  const response: ApexActionResponse = {
-    ok: true,
-    result: { actionId: action.id },
-  };
-  return c.json(response);
-});
+  const body = (await c.req.json().catch(() => ({}))) as Partial<ApexActionRequest>;
 
-app.get("/api/apex/runtime/actions/:sessionId", (c) => {
-  const { sessionId } = c.req.param();
-  return c.json(actionQueue.dequeueAll(sessionId));
-});
+  if (!body.sessionId || !body.action) {
+    return c.json({ ok: false, error: "Missing sessionId or action" } satisfies ApexActionResponse, 400);
+  }
 
-app.post("/api/apex/runtime/action-result", async (c) => {
-  const body = (await c.req.json()) as {
-    actionId: string;
-    ok: boolean;
-    result?: unknown;
-    error?: string;
-  };
-  actionQueue.submitResult(body);
-  return c.json({ ok: true });
+  const resolvedSessionId = body.sessionId === "current" ? registry.getCurrentSessionId() : body.sessionId;
+  if (!resolvedSessionId) {
+    return c.json({ ok: false, error: "No current session" } satisfies ApexActionResponse, 404);
+  }
+
+  const session = registry.get(resolvedSessionId);
+  if (!session) {
+    return c.json({ ok: false, error: `Unknown session: ${resolvedSessionId}` } satisfies ApexActionResponse, 404);
+  }
+
+  const action = enqueueAction({
+    sessionId: resolvedSessionId,
+    action: body.action,
+    payload: body.payload,
+  });
+
+  return c.json({ ok: true, result: { actionId: action.id } } satisfies ApexActionResponse);
 });
 
 // ─── pi backend proxy ─────────────────────────────────────────────────────────

@@ -14,16 +14,11 @@ function cloneSnapshot(snapshot: ApexSessionSnapshot): ApexSessionSnapshot {
     session: { ...snapshot.session },
     messages: [...snapshot.messages],
     thread: [...snapshot.thread],
-    branches: snapshot.branches ? [...snapshot.branches] : undefined,
+    branches: [...snapshot.branches],
     tools: [...snapshot.tools],
     activeTools: [...snapshot.activeTools],
     extensions: [...snapshot.extensions],
-    capabilities: {
-      session: { ...snapshot.capabilities.session },
-      messaging: { ...snapshot.capabilities.messaging },
-      ui: { ...snapshot.capabilities.ui },
-      tools: { ...snapshot.capabilities.tools },
-    },
+    capabilities: snapshot.capabilities,
   };
 }
 

@@ -1,2 +1,10 @@
-export { ActionHandler, bridgeBase, type RuntimeActionExecutor } from "./action-handler.js";
-export { startApexActionHandling } from "./extension.js";
+export {
+  gatherBranches,
+  gatherHostCapabilities,
+  gatherMessageHistory,
+  gatherRuntimeExtensions,
+  gatherSessionSnapshot,
+  gatherThread,
+  gatherTools,
+} from "./snapshot.js";
+export { publishExtensionEvents } from "./event-stream.js";

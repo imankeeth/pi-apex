@@ -29,8 +29,10 @@ declare global {
       theme?: "dark" | "light";
       defaults?: { activeTab?: string; tabOrder?: string[] };
     };
-    __APEX_STORE__?: ApexSessionSnapshot | null;
-    __APEX_SDK__?: PiSDK;
+    __APEX_SESSIONS__?: {
+      sessions: { id: string; projectName?: string; projectRoot?: string; cwd: string }[];
+      currentSessionId?: string | null;
+    };
   }
 }
 
@@ -474,6 +476,38 @@ class PiApexShell {
     for (const [id, ext] of this.extensions) {
       const btn = this.createTabButton(id, ext.manifest);
       this.tabBar.appendChild(btn);
+    }
+
+    void this.appendSessionIndicator();
+  }
+
+  private async appendSessionIndicator(): Promise<void> {
+    try {
+      const sessions = await apexHttp.get<{ sessions: { id: string; projectName?: string; cwd: string }[]; currentSessionId?: string | null }>("/sessions");
+      window.__APEX_SESSIONS__ = sessions;
+
+      if (sessions.sessions.length <= 1) {
+        return;
+      }
+
+      const sessionIndicator = document.createElement("span");
+      sessionIndicator.style.cssText = `
+        font-size: 11px;
+        color: var(--text-muted);
+        padding: 0 8px;
+        margin-left: auto;
+        cursor: pointer;
+        white-space: nowrap;
+      `;
+
+      const current = sessions.sessions.find((session) => session.id === sessions.currentSessionId);
+      sessionIndicator.textContent = current?.projectName ?? current?.cwd ?? "session";
+      sessionIndicator.title = `${sessions.sessions.length} sessions registered`;
+      sessionIndicator.style.cursor = "default";
+
+      this.tabBar.appendChild(sessionIndicator);
+    } catch (err) {
+      console.warn("[pi-apex] Failed to load sessions:", err);
     }
   }
 
