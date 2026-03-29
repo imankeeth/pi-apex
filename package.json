@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "tsc -b",
     "build:sdk": "cd packages/sdk && npm run build",
     "build:react-sdk": "cd packages/react-sdk && npm run build",
     "build:shell": "cd packages/shell && npm run build",
