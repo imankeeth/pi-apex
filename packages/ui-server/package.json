@@ -4,6 +4,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
+    "prebuild": "npm run build --workspace=@pi-apex/types && npm run build --workspace=@pi-apex/shell",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"

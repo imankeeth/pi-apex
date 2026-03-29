@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@pi-apex/sdk": "file:../../sdk",
     "@pi-apex/react-sdk": "workspace:*",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"

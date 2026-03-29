@@ -3,18 +3,13 @@
 // Visualizes the pi session as a threaded conversation tree.
 // ============================================================================
 
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  PiProvider,
-  useContext as useSessionContext,
-  useMessaging,
-  useOnMessage,
-  useOnToolCall,
-  useOnToolResult,
-  useSession,
-} from "@pi-apex/react-sdk";
-import { createExtension, type Message, type PiSDK, type ThreadNode, type ToolCall, type ToolResult } from "@pi-apex/sdk";
+import { PiProvider, useSession, useMessaging, useOnToolCall, useOnToolResult, useOnMessage } from "@pi-apex/react-sdk";
+import { createExtension, type PiSDK, type ThreadNode, type ToolCall, type ToolResult, type Message } from "@pi-apex/sdk";
+import { ExtensionPanel } from "./components/ExtensionPanel";
+
+// ─── Tree model builder ───────────────────────────────────────────────────────
 
 interface TreeState {
   nodes: ThreadNode[];
@@ -177,13 +172,15 @@ function ThreadTreeApp(): JSX.Element {
 
   const [tree, setTree] = useState<TreeState>(() => buildInitialTree(messages, thread));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState("all");
-  const [draft, setDraft] = useState("");
-  const [deliveryMode, setDeliveryMode] = useState<"send" | "prompt">("prompt");
+  const [filter, setFilter] = useState<string>("all");
+  const [view, setView] = useState<"tree" | "extensions">("tree");
 
   useEffect(() => {
-    setTree(buildInitialTree(messages, thread));
-  }, [messages, thread]);
+    const { nodes: n, currentUserNodeId: u, currentAssistantNodeId: a } = buildInitialTree(messages, threadFromSession);
+    setNodes(n);
+    setCurrentUserNodeId(u);
+    setCurrentAssistantNodeId(a);
+  }, [messages, threadFromSession]);
 
   useOnMessage((msg: Message) => {
     setTree((prev) => appendMessage(prev, msg));
@@ -234,66 +231,88 @@ function ThreadTreeApp(): JSX.Element {
   const sessionMeta = context ?? null;
 
   return (
-    <div style={appShell}>
-      <div style={header}>
-        <div style={headerTitle}>Thread Tree</div>
-        <div style={headerMeta}>
-          <span>{sessionMeta?.cwd || "Unknown cwd"}</span>
-          <span>{sessionMeta?.projectName || "Unknown project"}</span>
-          <span>{sessionMeta?.gitBranch ? `branch ${sessionMeta.gitBranch}` : "no branch"}</span>
-          <span>{sessionMeta?.model ? `model ${sessionMeta.model}` : "model unknown"}</span>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: "var(--font-mono, monospace)", fontSize: 12 }}>
+      <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0, background: "var(--bg-subtle)" }}>
+        <button
+          onClick={() => setView("tree")}
+          style={{ ...toolbarBtn, background: view === "tree" ? "var(--bg-elevated)" : "transparent", color: view === "tree" ? "var(--accent)" : "var(--text-secondary)" }}
+        >
+          Tree
+        </button>
+        <button
+          onClick={() => setView("extensions")}
+          style={{ ...toolbarBtn, background: view === "extensions" ? "var(--bg-elevated)" : "transparent", color: view === "extensions" ? "var(--accent)" : "var(--text-secondary)" }}
+        >
+          Extensions
+        </button>
       </div>
 
-      <div style={toolbar}>
-        <button onClick={() => setExpanded(new Set())} style={toolbarBtn}>Collapse all</button>
-        <button onClick={() => setExpanded(new Set(visibleNodes.map((node) => node.id)))} style={toolbarBtn}>Expand all</button>
-        <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ ...toolbarBtn, cursor: "pointer" }}>
-          <option value="all">All nodes</option>
-          <option value="tools">Tools only</option>
-          <option value="messages">Messages only</option>
-        </select>
-      </div>
+      {view === "extensions" ? (
+        <ExtensionPanel onClose={() => setView("tree")} />
+      ) : (
+        <>
+          {/* Toolbar */}
+          <div style={{ display: "flex", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+            <button
+              onClick={() => setExpanded(new Set())}
+              style={toolbarBtn}
+            >
+              Collapse all
+            </button>
+            <button
+              onClick={() => setExpanded(new Set(visibleNodes.map((n) => n.id)))}
+              style={toolbarBtn}
+            >
+              Expand all
+            </button>
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              style={{ ...toolbarBtn, cursor: "pointer" }}
+            >
+              <option value="all">All nodes</option>
+              <option value="tools">Tools only</option>
+              <option value="messages">Messages only</option>
+            </select>
+          </div>
 
-      <div style={treePane}>
-        {visibleNodes.length === 0 ? (
-          <div style={emptyState}>No activity yet. Start a conversation with pi.</div>
-        ) : (
-          visibleNodes.map((node) => (
-            <TreeNodeRow
-              key={node.id}
-              node={node}
-              expanded={expanded}
-              onToggle={toggleExpanded}
-              onReply={handleReply}
-              depth={0}
-            />
-          ))
-        )}
-      </div>
+          {/* Tree */}
+          <div style={{ flex: 1, overflow: "auto", padding: "8px 0" }}>
+            {visibleNodes.length === 0 ? (
+              <div style={{ padding: "20px 12px", color: "var(--text-muted)", textAlign: "center" }}>
+                No activity yet. Start a conversation with pi.
+              </div>
+            ) : (
+              visibleNodes.map((node) => (
+                <TreeNodeRow
+                  key={node.id}
+                  node={node}
+                  expanded={expanded}
+                  onToggle={toggleExpanded}
+                  onReply={handleReply}
+                  depth={0}
+                />
+              ))
+            )}
+          </div>
 
-      <div style={composer}>
-        <div style={statusRow}>
-          <span>{tree.nodes.length} nodes</span>
-          <span>{tree.nodes.filter((node) => node.type === "tool_call").length} tool calls</span>
-          <span>{tree.nodes.filter((node) => node.type === "user_message").length} messages</span>
-          <span>{branches.length} branches</span>
-          <span>{activeBranch ? `active ${activeBranch.label}` : "no active branch"}</span>
-        </div>
-        <form onSubmit={handleSubmit} style={composerForm}>
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Type a message or prompt..."
-            style={composerInput}
-          />
-          <select value={deliveryMode} onChange={(e) => setDeliveryMode(e.target.value as "send" | "prompt")} style={deliverySelect}>
-            <option value="prompt">Prompt</option>
-            <option value="send">Send</option>
-          </select>
-          <button type="submit" style={composerButton}>Run</button>
-        </form>
-      </div>
+          {/* Status bar */}
+          <div style={{
+            display: "flex",
+            gap: 16,
+            padding: "6px 12px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--bg-subtle)",
+            fontSize: 11,
+            color: "var(--text-muted)",
+            flexShrink: 0,
+          }}>
+            <span>{nodes.length} nodes</span>
+            <span>{nodes.filter((n) => n.type === "tool_call").length} tool calls</span>
+            <span>{nodes.filter((n) => n.type === "user_message").length} messages</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -314,9 +333,9 @@ function TreeNodeRow({ node, expanded, onToggle, onReply, depth }: TreeNodeRowPr
   const [showMenu, setShowMenu] = useState(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
 
-  const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setMenuPos({ x: event.clientX, y: event.clientY });
+  const handleContextMenu = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    setMenuPos({ x: e.clientX, y: e.clientY });
     setShowMenu(true);
   };
 
@@ -462,106 +481,6 @@ const appShell: CSSProperties = {
   fontSize: 12,
 };
 
-const header: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  padding: "10px 12px",
-  borderBottom: "1px solid var(--border)",
-  background: "linear-gradient(180deg, rgba(255,255,255,0.03), transparent)",
-  flexShrink: 0,
-};
-
-const headerTitle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 700,
-  color: "var(--text)",
-};
-
-const headerMeta: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  color: "var(--text-muted)",
-  fontSize: 11,
-};
-
-const toolbar: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  padding: "8px 12px",
-  borderBottom: "1px solid var(--border)",
-  flexShrink: 0,
-};
-
-const treePane: CSSProperties = {
-  flex: 1,
-  overflow: "auto",
-  padding: "8px 0",
-};
-
-const emptyState: CSSProperties = {
-  padding: "20px 12px",
-  color: "var(--text-muted)",
-  textAlign: "center",
-};
-
-const composer: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-  padding: "8px 12px",
-  borderTop: "1px solid var(--border)",
-  background: "var(--bg-subtle)",
-  flexShrink: 0,
-};
-
-const statusRow: CSSProperties = {
-  display: "flex",
-  gap: 12,
-  flexWrap: "wrap",
-  color: "var(--text-muted)",
-  fontSize: 11,
-};
-
-const composerForm: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-};
-
-const composerInput: CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  padding: "8px 10px",
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg-elevated)",
-  color: "var(--text)",
-  fontFamily: "inherit",
-  fontSize: 12,
-};
-
-const deliverySelect: CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg-elevated)",
-  color: "var(--text-secondary)",
-  fontFamily: "inherit",
-  fontSize: 12,
-};
-
-const composerButton: CSSProperties = {
-  padding: "8px 14px",
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--accent)",
-  color: "white",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
 const toolbarBtn: CSSProperties = {
   padding: "3px 10px",
   borderRadius: 4,
@@ -571,6 +490,8 @@ const toolbarBtn: CSSProperties = {
   fontSize: 11,
   cursor: "pointer",
 };
+
+// ─── Bootstrap ─────────────────────────────────────────────────────────────────
 
 function bootstrap(sdk: PiSDK): void {
   const root = document.getElementById("root");

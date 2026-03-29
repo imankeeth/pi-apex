@@ -1,4 +1,20 @@
-export interface ApexMessage {
+import type { HostCapabilities } from "./host-capabilities.js";
+import type { RuntimeExtensionInfo } from "./runtime-extension.js";
+
+export interface ApexSessionInfo {
+  id: string;
+  projectName: string;
+  projectRoot: string;
+  cwd: string;
+  gitBranch?: string | null;
+}
+
+export interface ApexSessionSummary extends ApexSessionInfo {
+  registeredAt: number;
+  lastActivityAt: number;
+}
+
+export interface Message {
   id: string;
   role: "user" | "assistant" | "system" | "custom";
   content: string;
@@ -33,37 +49,12 @@ export interface ApexBranch {
   isActive: boolean;
 }
 
-export interface ApexToolDef {
-  name: string;
-  label: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
-
-export interface ApexSessionInfo {
-  id: string;
-  file?: string;
-  name?: string;
-  cwd: string;
-  projectName?: string;
-  projectRoot?: string;
-  gitBranch?: string;
-  provider?: string;
-  model?: string;
-  isStreaming: boolean;
-}
-
-export interface ApexSessionSummary extends ApexSessionInfo {
-  lastActivityAt?: number;
-  registeredAt: number;
-}
-
 export interface ApexSessionSnapshot {
   session: ApexSessionInfo;
-  messages: ApexMessage[];
-  thread: ApexThreadNode[];
-  branches?: ApexBranch[];
-  tools: ApexToolDef[];
+  messages: Message[];
+  thread: ThreadNode[];
+  branches: Branch[];
+  tools: ToolDef[];
   activeTools: string[];
   extensions: RuntimeExtensionInfo[];
   capabilities: HostCapabilities;

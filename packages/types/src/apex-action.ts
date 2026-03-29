@@ -29,16 +29,7 @@ export interface RuntimeActionResult {
   completedAt: number;
 }
 
-export interface RegisterSessionRequest extends ApexSessionSnapshot {
-  session: ApexSessionSnapshot["session"];
-  messages: ApexSessionSnapshot["messages"];
-  thread: ApexSessionSnapshot["thread"];
-  branches?: ApexSessionSnapshot["branches"];
-  tools: ApexSessionSnapshot["tools"];
-  activeTools: ApexSessionSnapshot["activeTools"];
-  extensions: ApexSessionSnapshot["extensions"];
-  capabilities: ApexSessionSnapshot["capabilities"];
-}
+export interface RegisterSessionRequest extends ApexSessionSnapshot {}
 
 export interface RegisterSessionResponse {
   ok: true;

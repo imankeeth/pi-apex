@@ -1,13 +1,6 @@
 export interface RuntimeExtensionCommand {
-  id: string;
-  label: string;
+  name: string;
   description?: string;
-}
-
-export interface RuntimeExtensionUiCapabilities {
-  panel?: boolean;
-  modal?: boolean;
-  notifications?: boolean;
 }
 
 export interface RuntimeExtensionInfo {
@@ -16,6 +9,6 @@ export interface RuntimeExtensionInfo {
   source: string;
   compatibility: string;
   commands: RuntimeExtensionCommand[];
-  uiCapabilities: RuntimeExtensionUiCapabilities;
-  status?: "active" | "inactive" | "error" | "loading";
+  uiCapabilities: string[];
+  status?: string;
 }

@@ -8,133 +8,146 @@ import type {
   ToolDef,
 } from "@pi-apex/types";
 
-type PiRuntime = Record<string, unknown> & {
-  session?: Record<string, unknown>;
-  tools?: Record<string, unknown>;
-  events?: Record<string, unknown>;
-  extensions?: unknown;
-  runtimeExtensions?: unknown;
-  model?: string;
-  provider?: string;
-  cwd?: string;
+interface PiRuntimeExtension {
+  name?: string;
+  source?: string;
+  commands?: { name: string; description?: string }[];
+  uiCapabilities?: string[];
+  status?: string;
+}
+
+interface PiRuntimeSession {
+  id?: string;
   projectName?: string;
   projectRoot?: string;
-  gitBranch?: string;
-  isStreaming?: boolean;
-};
-
-function getPiRuntime(): PiRuntime {
-  return (globalThis as { pi?: PiRuntime }).pi ?? {};
+  cwd?: string;
+  gitBranch?: string | null;
+  messages?: Message[];
+  thread?: ThreadNode[];
+  branches?: Branch[];
+  tools?: ToolDef[];
+  activeTools?: string[];
+  capabilities?: Partial<HostCapabilities>;
 }
 
-function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+interface PiRuntime {
+  session?: PiRuntimeSession;
+  extensions?: Record<string, PiRuntimeExtension>;
+  capabilities?: Partial<HostCapabilities>;
+  messages?: Message[];
+  thread?: ThreadNode[];
+  branches?: Branch[];
+  tools?: ToolDef[];
+  activeTools?: string[];
 }
 
-function readSessionValue<T>(runtime: PiRuntime, key: string, fallback?: T): T | undefined {
-  const session = runtime.session;
-  if (session && key in session) {
-    return session[key] as T;
-  }
-  if (key in runtime) {
-    return runtime[key] as T;
-  }
-  return fallback;
+function getRuntime(): PiRuntime {
+  const runtime = globalThis as typeof globalThis & { pi?: PiRuntime };
+  return runtime.pi ?? {};
 }
 
-function gatherBranches(runtime: PiRuntime): Branch[] {
-  const session = runtime.session;
-  const branchSource =
-    session && "getBranches" in session && typeof session.getBranches === "function"
-      ? session.getBranches
-      : session?.branches;
+function gatherSessionInfo(): ApexSessionSnapshot["session"] {
+  const runtime = getRuntime();
+  const session = runtime.session ?? {};
 
-  if (typeof branchSource === "function") {
-    return asArray<Branch>(branchSource.call(session));
-  }
-
-  return asArray<Branch>(branchSource);
-}
-
-export function gatherHostCapabilities(): HostCapabilities {
   return {
-    session: { getMessages: true, getThread: true, getBranches: true, fork: true, switch: true, getActiveBranch: true },
-    messaging: { send: true, sendAsUser: true, sendAsSystem: true, append: true },
-    ui: { theme: true, tabs: true, panels: true },
-    tools: { getAll: true, getActive: true, setActive: true, call: true, intercept: true },
+    id: session.id ?? "current",
+    projectName: session.projectName ?? "Unknown project",
+    projectRoot: session.projectRoot ?? session.cwd ?? "",
+    cwd: session.cwd ?? "",
+    gitBranch: session.gitBranch ?? null,
   };
 }
 
 export function gatherMessageHistory(): Message[] {
-  const runtime = getPiRuntime();
-  const session = runtime.session;
-
-  if (session && typeof session.getMessages === "function") {
-    return asArray<Message>(session.getMessages.call(session));
-  }
-
-  return asArray<Message>(
-    readSessionValue<unknown>(runtime, "messages", readSessionValue<unknown>(runtime, "history", []))
-  );
+  const runtime = getRuntime();
+  return runtime.messages ?? runtime.session?.messages ?? [];
 }
 
 export function gatherThread(): ThreadNode[] {
-  const runtime = getPiRuntime();
-  const session = runtime.session;
+  const runtime = getRuntime();
+  return runtime.thread ?? runtime.session?.thread ?? [];
+}
 
-  if (session && typeof session.getThread === "function") {
-    return asArray<ThreadNode>(session.getThread.call(session));
-  }
-
-  return asArray<ThreadNode>(readSessionValue<unknown>(runtime, "thread", []));
+export function gatherBranches(): Branch[] {
+  const runtime = getRuntime();
+  return runtime.branches ?? runtime.session?.branches ?? [];
 }
 
 export function gatherTools(): { tools: ToolDef[]; activeTools: string[] } {
-  const runtime = getPiRuntime();
-  const tools = runtime.tools;
-
-  const gatheredTools =
-    tools && typeof tools.getAll === "function"
-      ? asArray<ToolDef>(tools.getAll.call(tools))
-      : asArray<ToolDef>(readSessionValue<unknown>(runtime, "tools", []));
-
-  const activeTools =
-    tools && typeof tools.getActive === "function"
-      ? asArray<string>(tools.getActive.call(tools))
-      : asArray<string>(readSessionValue<unknown>(runtime, "activeTools", []));
-
-  return { tools: gatheredTools, activeTools };
+  const runtime = getRuntime();
+  return {
+    tools: runtime.tools ?? runtime.session?.tools ?? [],
+    activeTools: runtime.activeTools ?? runtime.session?.activeTools ?? [],
+  };
 }
 
 export function gatherRuntimeExtensions(): RuntimeExtensionInfo[] {
-  const runtime = getPiRuntime();
-  return asArray<RuntimeExtensionInfo>(runtime.runtimeExtensions ?? runtime.extensions ?? []);
+  const extensions: RuntimeExtensionInfo[] = [];
+
+  // @ts-ignore - pi is injected by the Pi runtime.
+  const piExtensions = (globalThis.pi as { extensions?: Record<string, unknown> } | undefined)?.extensions ?? {};
+
+  for (const [id, ext] of Object.entries(piExtensions)) {
+    const extInfo = ext as PiRuntimeExtension;
+
+    extensions.push({
+      id,
+      name: extInfo.name ?? id,
+      source: extInfo.source ?? "project",
+      compatibility: "runtime-compatible",
+      commands: extInfo.commands ?? [],
+      uiCapabilities: extInfo.uiCapabilities ?? [],
+      status: extInfo.status,
+    });
+  }
+
+  return extensions;
 }
 
-export function gatherSessionSnapshot(): ApexSessionSnapshot {
-  const runtime = getPiRuntime();
-  const { tools, activeTools } = gatherTools();
-  const sessionId =
-    (readSessionValue<string>(runtime, "id") ?? readSessionValue<string>(runtime, "sessionId") ?? "unknown-session");
+export function gatherHostCapabilities(): HostCapabilities {
+  const runtime = getRuntime();
+  const capabilities = runtime.capabilities ?? runtime.session?.capabilities ?? {};
 
   return {
     session: {
-      id: sessionId,
-      file: readSessionValue<string>(runtime, "file"),
-      name: readSessionValue<string>(runtime, "name"),
-      cwd: readSessionValue<string>(runtime, "cwd") ?? process.cwd(),
-      projectName: readSessionValue<string>(runtime, "projectName"),
-      projectRoot: readSessionValue<string>(runtime, "projectRoot"),
-      gitBranch: readSessionValue<string>(runtime, "gitBranch"),
-      provider: readSessionValue<string>(runtime, "provider"),
-      model: readSessionValue<string>(runtime, "model"),
-      isStreaming: Boolean(readSessionValue<boolean>(runtime, "isStreaming", false)),
+      fork: capabilities.session?.fork ?? false,
+      switch: capabilities.session?.switch ?? false,
+      compact: capabilities.session?.compact ?? false,
+      abort: capabilities.session?.abort ?? false,
     },
+    messaging: {
+      prompt: capabilities.messaging?.prompt ?? false,
+      steer: capabilities.messaging?.steer ?? false,
+      followUp: capabilities.messaging?.followUp ?? false,
+    },
+    ui: {
+      notify: capabilities.ui?.notify ?? false,
+      confirm: capabilities.ui?.confirm ?? false,
+      input: capabilities.ui?.input ?? false,
+      select: capabilities.ui?.select ?? false,
+      form: capabilities.ui?.form ?? false,
+      customView: capabilities.ui?.customView ?? false,
+    },
+    tools: {
+      call: capabilities.tools?.call ?? false,
+      intercept: capabilities.tools?.intercept ?? false,
+    },
+  };
+}
+
+export function gatherSessionSnapshot(): ApexSessionSnapshot {
+  const runtime = getRuntime();
+  const session = gatherSessionInfo();
+  const tools = gatherTools();
+
+  return {
+    session,
     messages: gatherMessageHistory(),
     thread: gatherThread(),
-    branches: gatherBranches(runtime),
-    tools,
-    activeTools,
+    branches: gatherBranches(),
+    tools: tools.tools,
+    activeTools: tools.activeTools,
     extensions: gatherRuntimeExtensions(),
     capabilities: gatherHostCapabilities(),
   };

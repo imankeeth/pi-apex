@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/types" },
+    { "path": "./packages/pi-apex" },
     { "path": "./packages/sdk" },
     { "path": "./packages/react-sdk" },
     { "path": "./packages/shell" },

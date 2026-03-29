@@ -39,6 +39,13 @@ type ExtensionSource =
   | { type: "npm"; name: string }
   | { type: "local"; path: string };
 
+const DEFAULT_CAPABILITIES = {
+  session: { fork: false, switch: false, compact: false, abort: false },
+  messaging: { prompt: false, steer: false, followUp: false },
+  ui: { notify: false, confirm: false, input: false, select: false, form: false, customView: false },
+  tools: { call: false, intercept: false },
+};
+
 function loadConfig(): PiApexConfig {
   try {
     const raw = readFileSync(join(ROOT, "pi-apex.config.json"), "utf8");
@@ -160,9 +167,19 @@ app.get("/api/apex/sessions", (c) => {
   });
 });
 
+app.get("/api/apex/extensions", (c) => {
+  const session = registry.getCurrent();
+  return c.json(session?.extensions ?? []);
+});
+
+app.get("/api/apex/capabilities", (c) => {
+  const session = registry.getCurrent();
+  return c.json(session?.capabilities ?? DEFAULT_CAPABILITIES);
+});
+
 app.get("/api/apex/session/current", (c) => {
   const session = registry.getCurrent();
-  return c.json(session);
+  return c.json(session ?? null);
 });
 
 app.get("/api/apex/session/:id", (c) => {
@@ -201,29 +218,8 @@ app.post("/api/apex/runtime/register", async (c) => {
 });
 
 app.post("/api/apex/action", async (c) => {
-  const body = (await c.req.json()) as ApexActionRequest;
-  const action = actionQueue.enqueue(body.sessionId, body);
-  const response: ApexActionResponse = {
-    ok: true,
-    result: { actionId: action.id },
-  };
-  return c.json(response);
-});
-
-app.get("/api/apex/runtime/actions/:sessionId", (c) => {
-  const { sessionId } = c.req.param();
-  return c.json(actionQueue.dequeueAll(sessionId));
-});
-
-app.post("/api/apex/runtime/action-result", async (c) => {
-  const body = (await c.req.json()) as {
-    actionId: string;
-    ok: boolean;
-    result?: unknown;
-    error?: string;
-  };
-  actionQueue.submitResult(body);
-  return c.json({ ok: true });
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  return c.json({ ok: true, received: body });
 });
 
 // ─── pi backend proxy ─────────────────────────────────────────────────────────

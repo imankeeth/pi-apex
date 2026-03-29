@@ -13,14 +13,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@pi-apex/types": ["../types/src/index.ts"]
-    }
+    "types": ["node"]
   },
-  "include": ["src/**/*"],
-  "references": [
-    { "path": "../types" }
-  ]
+  "include": ["src/**/*"]
 }
