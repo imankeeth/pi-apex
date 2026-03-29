@@ -1,4 +1,12 @@
-export type { ApexSessionInfo, ApexSessionSnapshot, ApexSessionSummary } from "./apex-session.js";
+export type {
+  ApexSessionInfo,
+  ApexSessionSnapshot,
+  ApexSessionSummary,
+  Branch,
+  Message,
+  ThreadNode,
+  ToolDef,
+} from "./apex-session.js";
 export type { ApexEvent, ApexEventEnvelope, ApexEventType } from "./apex-event.js";
 export type {
   ApexActionRequest,

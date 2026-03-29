@@ -18,10 +18,12 @@ function cloneSnapshot(snapshot: ApexSessionSnapshot): ApexSessionSnapshot {
     tools: [...snapshot.tools],
     activeTools: [...snapshot.activeTools],
     extensions: [...snapshot.extensions],
-    capabilities:
-      snapshot.capabilities && typeof snapshot.capabilities === "object"
-        ? { ...(snapshot.capabilities as Record<string, unknown>) }
-        : snapshot.capabilities,
+    capabilities: {
+      session: { ...snapshot.capabilities.session },
+      messaging: { ...snapshot.capabilities.messaging },
+      ui: { ...snapshot.capabilities.ui },
+      tools: { ...snapshot.capabilities.tools },
+    },
   };
 }
 

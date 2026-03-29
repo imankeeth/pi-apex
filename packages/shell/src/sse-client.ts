@@ -3,21 +3,19 @@ import type { ApexEvent } from "@pi-apex/types";
 type EventHandler = (event: ApexEvent) => void;
 type ErrorHandler = () => void;
 
-function parseEvent(data: string): ApexEvent {
-  const [typeLine = "", payloadLine = ""] = data.split(/\r?\n/, 2);
+function parseEvent(data: string): ApexEvent | null {
   try {
-    const parsed = JSON.parse(payloadLine) as { payload?: unknown; ts?: number };
+    const parsed = JSON.parse(data) as { type?: unknown; payload?: unknown; ts?: unknown };
+    if (typeof parsed.type !== "string") {
+      return null;
+    }
     return {
-      type: typeLine as ApexEvent["type"],
+      type: parsed.type as ApexEvent["type"],
       payload: parsed.payload,
       ts: typeof parsed.ts === "number" ? parsed.ts : Date.now(),
     };
   } catch {
-    return {
-      type: typeLine as ApexEvent["type"],
-      payload: payloadLine,
-      ts: Date.now(),
-    };
+    return null;
   }
 }
 
@@ -59,6 +57,7 @@ export class BrowserEventSource {
 
     source.onmessage = (event) => {
       const parsed = parseEvent(event.data);
+      if (!parsed) return;
       for (const handler of this.eventHandlers) {
         try {
           handler(parsed);

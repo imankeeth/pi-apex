@@ -60,28 +60,38 @@ export class ApexSessionStore {
     this.eventSource?.close();
     this.eventSource = new BrowserEventSource(`/api/apex/session/${encodeURIComponent(sessionId)}/events`);
     this.eventSource.onEvent((event: ApexEvent) => {
-      void this.handleEvent(event);
+      this.handleEvent(event).catch((err) =>
+        console.error("[pi-apex] store event error:", err)
+      );
     });
   }
 
   private async handleEvent(event: ApexEvent): Promise<void> {
     if (!this.sessionId) return;
 
-    if (
-      event.type === "session_registered" ||
-      event.type === "session_updated" ||
-      event.type === "message" ||
-      event.type === "message_delta" ||
-      event.type === "tool_call" ||
-      event.type === "tool_result" ||
-      event.type === "thinking" ||
-      event.type === "status" ||
-      event.type === "extension_notification" ||
-      event.type === "extension_command_registered" ||
-      event.type === "extension_state_changed"
-    ) {
-      this.snapshot = await this.fetchSnapshot(this.sessionId);
-      this.notify();
+    if (this.snapshot) {
+      switch (event.type) {
+        case "message":
+        case "message_delta":
+        case "tool_call":
+        case "tool_result":
+        case "thinking":
+          this.notify();
+          return;
+        case "session_registered":
+        case "session_updated":
+        case "status":
+        case "extension_notification":
+        case "extension_command_registered":
+        case "extension_state_changed":
+          this.snapshot = await this.fetchSnapshot(this.sessionId);
+          this.notify();
+          return;
+        default:
+          this.snapshot = await this.fetchSnapshot(this.sessionId);
+          this.notify();
+          return;
+      }
     }
   }
 
@@ -95,4 +105,3 @@ export class ApexSessionStore {
     }
   }
 }
-

@@ -178,7 +178,7 @@ app.post("/api/apex/runtime/register", async (c) => {
   const sessionId = registry.register(body);
   registry.setCurrent(sessionId);
 
-  const url = new URL(`/api/apex/session/${sessionId}`, c.req.url).toString();
+  const url = new URL(`/?session=${encodeURIComponent(sessionId)}`, c.req.url).toString();
   const response: RegisterSessionResponse = {
     ok: true,
     sessionId,

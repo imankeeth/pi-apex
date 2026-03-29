@@ -5,6 +5,7 @@
     { "path": "./packages/sdk" },
     { "path": "./packages/react-sdk" },
     { "path": "./packages/shell" },
-    { "path": "./packages/ui-server" }
+    { "path": "./packages/ui-server" },
+    { "path": "./packages/pi-apex" }
   ]
 }
